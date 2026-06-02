@@ -1,8 +1,9 @@
 "use client"
 
 import Link from "next/link"
-import { useMemo } from "react"
-import { useAppStore } from "@/lib/store"
+import { useMemo, useState } from "react"
+import { useQuery } from "convex/react"
+import { api } from "@/convex/_generated/api"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -12,29 +13,30 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useState } from "react"
 import { Clock, AlertCircle, Loader2, ImageOff } from "lucide-react"
 
-type Filter = "all" | "done" | "processing" | "queued" | "error"
+type Filter = "all" | "completed" | "processing" | "pending" | "failed"
 
 export default function ResultsPage() {
-  const jobs = useAppStore((s) => s.jobs)
+  const jobs = useQuery(api.jobs.getQueue) ?? []
   const [filter, setFilter] = useState<Filter>("all")
 
+  const jobsMemo = useMemo(() => jobs, [jobs])
+
   const filtered = useMemo(() => {
-    if (filter === "all") return jobs
-    return jobs.filter((j) => j.status === filter)
-  }, [jobs, filter])
+    if (filter === "all") return jobsMemo
+    return jobsMemo.filter((j) => j.status === filter)
+  }, [jobsMemo, filter])
 
   const counts = useMemo(() => {
     return {
-      all: jobs.length,
-      done: jobs.filter((j) => j.status === "done").length,
-      processing: jobs.filter((j) => j.status === "processing").length,
-      queued: jobs.filter((j) => j.status === "queued").length,
-      error: jobs.filter((j) => j.status === "error").length,
+      all: jobsMemo.length,
+      completed: jobsMemo.filter((j) => j.status === "completed").length,
+      processing: jobsMemo.filter((j) => j.status === "processing").length,
+      pending: jobsMemo.filter((j) => j.status === "pending").length,
+      failed: jobsMemo.filter((j) => j.status === "failed").length,
     }
-  }, [jobs])
+  }, [jobsMemo])
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
@@ -50,12 +52,16 @@ export default function ResultsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All ({counts.all})</SelectItem>
-              <SelectItem value="done">Done ({counts.done})</SelectItem>
+              <SelectItem value="completed">
+                Completed ({counts.completed})
+              </SelectItem>
               <SelectItem value="processing">
                 Processing ({counts.processing})
               </SelectItem>
-              <SelectItem value="queued">Queued ({counts.queued})</SelectItem>
-              <SelectItem value="error">Error ({counts.error})</SelectItem>
+              <SelectItem value="pending">
+                Pending ({counts.pending})
+              </SelectItem>
+              <SelectItem value="failed">Failed ({counts.failed})</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -76,7 +82,7 @@ export default function ResultsPage() {
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {filtered.map((job) => (
-              <JobCard key={job.id} job={job} />
+              <JobCard key={job._id} job={job} />
             ))}
           </div>
         )}
@@ -88,44 +94,44 @@ export default function ResultsPage() {
 function JobCard({
   job,
 }: {
-  job: ReturnType<typeof useAppStore.getState>["jobs"][number]
+  job: NonNullable<
+    ReturnType<typeof useQuery<typeof api.jobs.getQueue>>
+  >[number]
 }) {
-  const isPlaceholder =
-    job.status === "error" || (job.status === "done" && !job.removedUrl)
+  const showResult = job.status === "completed" && job.outputUrl
+  const isFailed = job.status === "failed"
+  const isPendingOrProcessing =
+    job.status === "pending" || job.status === "processing"
 
   return (
     <Card className="overflow-hidden transition-colors hover:bg-accent/40">
       <CardContent className="p-0">
-        <Link href={`/details/${job.id}`} className="group block">
+        <Link href={`/details/${job._id}`} className="group block">
           <div className="relative aspect-video w-full overflow-hidden bg-muted">
-            {!isPlaceholder ? (
-              <img
-                src={
-                  job.status === "done" && job.removedUrl
-                    ? job.removedUrl
-                    : job.originalUrl
-                }
-                alt={job.fileName}
-                className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-              />
-            ) : null}
+            <img
+              src={showResult ? job.outputUrl! : job.inputUrl}
+              alt={job.fileName}
+              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+            />
 
             {/* Overlay states */}
-            {job.status !== "done" && (
+            {isPendingOrProcessing && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/60 backdrop-blur-[2px]">
                 {job.status === "processing" ? (
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                ) : job.status === "queued" ? (
-                  <Clock className="h-6 w-6 text-muted-foreground" />
                 ) : (
-                  <AlertCircle className="h-6 w-6 text-destructive" />
+                  <Clock className="h-6 w-6 text-muted-foreground" />
                 )}
                 <span className="text-xs font-medium text-muted-foreground">
-                  {job.status === "processing"
-                    ? "Processing..."
-                    : job.status === "queued"
-                      ? "Queued"
-                      : "Failed"}
+                  {job.status === "processing" ? "Processing…" : "Pending"}
+                </span>
+              </div>
+            )}
+            {isFailed && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/60 backdrop-blur-[2px]">
+                <AlertCircle className="h-6 w-6 text-destructive" />
+                <span className="text-xs font-medium text-destructive">
+                  Failed
                 </span>
               </div>
             )}
@@ -136,7 +142,7 @@ function JobCard({
           <div className="px-4 py-3">
             <p className="truncate text-sm font-medium">{job.fileName}</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {new Date(job.createdAt).toLocaleString()}
+              {new Date(job._creationTime).toLocaleString()}
             </p>
           </div>
         </Link>
@@ -146,10 +152,11 @@ function JobCard({
 }
 
 function StatusBadge({ status }: { status: string }) {
-  if (status === "done") return <Badge variant="secondary">Done</Badge>
+  if (status === "completed")
+    return <Badge variant="secondary">Completed</Badge>
   if (status === "processing")
     return <Badge variant="default">Processing</Badge>
-  if (status === "queued") return <Badge variant="outline">Queued</Badge>
-  if (status === "error") return <Badge variant="destructive">Error</Badge>
+  if (status === "pending") return <Badge variant="outline">Pending</Badge>
+  if (status === "failed") return <Badge variant="destructive">Failed</Badge>
   return null
 }

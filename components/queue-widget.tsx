@@ -1,9 +1,9 @@
 "use client"
 
 import * as React from "react"
-import { useAppStore } from "@/lib/store"
+import { useQuery, useMutation, useAction } from "convex/react"
+import { api } from "@/convex/_generated/api"
 import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import {
@@ -23,16 +23,25 @@ import {
 } from "lucide-react"
 
 export function QueueWidget() {
-  const jobs = useAppStore((s) => s.jobs)
-  const removeJob = useAppStore((s) => s.removeJob)
-  const clearCompleted = useAppStore((s) => s.clearCompleted)
+  const jobs = useQuery(api.jobs.getQueue) ?? []
+  const deleteJob = useMutation(api.jobs.deleteJob)
+  const cleanupJobS3 = useAction(api.jobs.cleanupJobS3)
+  const clearCompleted = useMutation(api.jobs.clearCompleted)
   const [open, setOpen] = React.useState(true)
 
-  const queued = jobs.filter((j) => j.status === "queued")
+  const pending = jobs.filter((j) => j.status === "pending")
   const processing = jobs.filter((j) => j.status === "processing")
-  const done = jobs.filter((j) => j.status === "done")
-  const error = jobs.filter((j) => j.status === "error")
-  const activeCount = queued.length + processing.length
+  const completed = jobs.filter((j) => j.status === "completed")
+  const failed = jobs.filter((j) => j.status === "failed")
+  const activeCount = pending.length + processing.length
+
+  const handleDelete = React.useCallback(
+    async (job: (typeof jobs)[number]) => {
+      await cleanupJobS3({ inputUrl: job.inputUrl, outputUrl: job.outputUrl })
+      await deleteJob({ jobId: job._id })
+    },
+    [cleanupJobS3, deleteJob]
+  )
 
   return (
     <div className="fixed right-6 bottom-6 z-50 flex flex-col items-end">
@@ -45,12 +54,12 @@ export function QueueWidget() {
                 Jobs
                 <span className="text-muted-foreground">({jobs.length})</span>
               </div>
-              {(done.length > 0 || error.length > 0) && (
+              {(completed.length > 0 || failed.length > 0) && (
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-7 text-xs"
-                  onClick={clearCompleted}
+                  onClick={() => clearCompleted()}
                 >
                   Clear completed
                 </Button>
@@ -64,48 +73,21 @@ export function QueueWidget() {
               ) : (
                 <ul className="divide-y">
                   {jobs.map((job) => (
-                    <li key={job.id} className="px-4 py-3">
+                    <li key={job._id} className="px-4 py-3">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium">
                             {job.fileName}
                           </p>
                           <div className="mt-1 flex items-center gap-2">
-                            {job.uploadStatus === "error" ? (
-                              <Badge
-                                variant="destructive"
-                                className="px-1.5 py-0 text-[10px]"
-                              >
-                                Upload failed
-                              </Badge>
-                            ) : job.uploadStatus === "uploading" ? (
-                              <Badge
-                                variant="outline"
-                                className="px-1.5 py-0 text-[10px]"
-                              >
-                                Uploading…
-                              </Badge>
-                            ) : (
-                              <StatusBadge status={job.status} />
-                            )}
-                            {job.status === "processing" && (
-                              <span className="text-xs text-muted-foreground">
-                                {Math.round(job.progress)}%
-                              </span>
-                            )}
+                            <StatusBadge status={job.status} />
                           </div>
-                          {job.status === "processing" && (
-                            <Progress
-                              value={job.progress}
-                              className="mt-2 h-1.5"
-                            />
-                          )}
                         </div>
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7 shrink-0"
-                          onClick={() => removeJob(job.id)}
+                          onClick={() => handleDelete(job)}
                           aria-label="Remove job"
                         >
                           <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
@@ -157,9 +139,9 @@ function StatusBadge({ status }: { status: string }) {
       variant: "default" | "secondary" | "destructive" | "outline"
     }
   > = {
-    queued: {
+    pending: {
       icon: <Clock className="h-3 w-3" />,
-      label: "Queued",
+      label: "Pending",
       variant: "secondary",
     },
     processing: {
@@ -167,18 +149,18 @@ function StatusBadge({ status }: { status: string }) {
       label: "Processing",
       variant: "default",
     },
-    done: {
+    completed: {
       icon: <CheckCircle2 className="h-3 w-3" />,
-      label: "Done",
+      label: "Completed",
       variant: "outline",
     },
-    error: {
+    failed: {
       icon: <AlertCircle className="h-3 w-3" />,
-      label: "Error",
+      label: "Failed",
       variant: "destructive",
     },
   }
-  const entry = map[status] ?? map.queued
+  const entry = map[status] ?? map.pending
   return (
     <Badge variant={entry.variant} className="gap-1 px-1.5 py-0 text-[10px]">
       {entry.icon}

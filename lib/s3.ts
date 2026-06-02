@@ -1,10 +1,5 @@
 /**
- * S3-compatible upload utilities.
- *
- * Design:
- * - Presigned PUT URLs are generated server-side via /api/upload/presigned.
- * - The client uploads directly to the S3-compatible storage from the browser.
- * - Images that fail to upload surface a clear error state; users can retry.
+ * Frontend S3 upload utilities.
  */
 
 export interface PresignedUrlResponse {
@@ -42,18 +37,5 @@ export async function uploadToS3(url: string, file: File): Promise<void> {
     throw new Error(
       `Upload failed with status ${res.status}: ${res.statusText}`
     )
-  }
-}
-
-export async function deleteFromS3(key: string): Promise<void> {
-  const res = await fetch("/api/upload/presigned", {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ key }),
-  })
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "Unknown error")
-    throw new Error(`Failed to delete object: ${text}`)
   }
 }
