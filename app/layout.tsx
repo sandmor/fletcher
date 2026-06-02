@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header"
 import { QueueWidget } from "@/components/queue-widget"
 import { Toaster } from "@/components/ui/sonner"
 import { cn } from "@/lib/utils"
+import { ConvexClientProvider } from "@/components/convex-client-provider"
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-sans" })
 
@@ -31,13 +32,15 @@ export default function RootLayout({
       )}
     >
       <body>
-        <ThemeProvider>
-          <Toaster position="bottom-right" richColors closeButton />
-          <ThemeHotkey />
-          <PageHeader />
-          {children}
-          <QueueWidget />
-        </ThemeProvider>
+        <ConvexClientProvider>
+          <ThemeProvider>
+            <Toaster position="bottom-right" richColors closeButton />
+            <ThemeHotkey />
+            <PageHeader />
+            {children}
+            <QueueWidget />
+          </ThemeProvider>
+        </ConvexClientProvider>
       </body>
     </html>
   )
