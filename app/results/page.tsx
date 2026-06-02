@@ -90,39 +90,44 @@ function JobCard({
 }: {
   job: ReturnType<typeof useAppStore.getState>["jobs"][number]
 }) {
+  const isPlaceholder =
+    job.status === "error" || (job.status === "done" && !job.removedUrl)
+
   return (
     <Card className="overflow-hidden transition-colors hover:bg-accent/40">
       <CardContent className="p-0">
         <Link href={`/details/${job.id}`} className="group block">
           <div className="relative aspect-video w-full overflow-hidden bg-muted">
-            {job.status === "done" && job.removedUrl ? (
+            {!isPlaceholder ? (
               <img
-                src={job.removedUrl}
+                src={
+                  job.status === "done" && job.removedUrl
+                    ? job.removedUrl
+                    : job.originalUrl
+                }
                 alt={job.fileName}
                 className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
               />
-            ) : job.status === "processing" || job.status === "queued" ? (
-              <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground">
+            ) : null}
+
+            {/* Overlay states */}
+            {job.status !== "done" && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/60 backdrop-blur-[2px]">
                 {job.status === "processing" ? (
-                  <Loader2 className="h-6 w-6 animate-spin" />
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                ) : job.status === "queued" ? (
+                  <Clock className="h-6 w-6 text-muted-foreground" />
                 ) : (
-                  <Clock className="h-6 w-6" />
+                  <AlertCircle className="h-6 w-6 text-destructive" />
                 )}
-                <span className="text-xs">
-                  {job.status === "processing" ? "Processing..." : "Queued"}
+                <span className="text-xs font-medium text-muted-foreground">
+                  {job.status === "processing"
+                    ? "Processing..."
+                    : job.status === "queued"
+                      ? "Queued"
+                      : "Failed"}
                 </span>
               </div>
-            ) : job.status === "error" ? (
-              <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-destructive">
-                <AlertCircle className="h-6 w-6" />
-                <span className="text-xs">Failed</span>
-              </div>
-            ) : (
-              <img
-                src={job.originalUrl}
-                alt={job.fileName}
-                className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-              />
             )}
             <div className="absolute top-2 right-2">
               <StatusBadge status={job.status} />

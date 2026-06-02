@@ -6,7 +6,7 @@ import { useAppStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, Download } from "lucide-react"
+import { ArrowLeft, Download, CloudOff, Loader2 } from "lucide-react"
 
 export default function DetailPage() {
   const params = useParams()
@@ -29,6 +29,11 @@ export default function DetailPage() {
   }
 
   const showBeforeAfter = job.status === "done" && job.removedUrl
+  const isUploading =
+    job.uploadStatus === "uploading" || job.uploadStatus === "idle"
+  const uploadFailed = job.uploadStatus === "error"
+
+  const displayUrl = job.originalUrl
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
@@ -48,6 +53,12 @@ export default function DetailPage() {
                 ? "Queued"
                 : "Error"}
         </Badge>
+        {uploadFailed && (
+          <Badge variant="destructive" className="gap-1">
+            <CloudOff className="h-3 w-3" />
+            Upload failed
+          </Badge>
+        )}
       </div>
 
       <div
@@ -55,12 +66,20 @@ export default function DetailPage() {
       >
         <Card>
           <CardContent className="p-0">
-            <div className="border-b px-4 py-3 text-sm font-medium text-muted-foreground">
-              Original
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <span className="text-sm font-medium text-muted-foreground">
+                Original
+              </span>
+              {isUploading && (
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Uploading…
+                </span>
+              )}
             </div>
             <div className="relative aspect-video w-full overflow-hidden bg-muted">
               <img
-                src={job.originalUrl}
+                src={displayUrl}
                 alt="Original"
                 className="h-full w-full object-cover"
               />

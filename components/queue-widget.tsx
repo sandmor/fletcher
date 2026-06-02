@@ -71,7 +71,23 @@ export function QueueWidget() {
                             {job.fileName}
                           </p>
                           <div className="mt-1 flex items-center gap-2">
-                            <StatusBadge status={job.status} />
+                            {job.uploadStatus === "error" ? (
+                              <Badge
+                                variant="destructive"
+                                className="px-1.5 py-0 text-[10px]"
+                              >
+                                Upload failed
+                              </Badge>
+                            ) : job.uploadStatus === "uploading" ? (
+                              <Badge
+                                variant="outline"
+                                className="px-1.5 py-0 text-[10px]"
+                              >
+                                Uploading…
+                              </Badge>
+                            ) : (
+                              <StatusBadge status={job.status} />
+                            )}
                             {job.status === "processing" && (
                               <span className="text-xs text-muted-foreground">
                                 {Math.round(job.progress)}%

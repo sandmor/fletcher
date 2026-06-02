@@ -1,17 +1,21 @@
 import { create } from "zustand"
 import { toast } from "sonner"
-import type { JobStatus } from "./types"
+import type { JobStatus, UploadStatus } from "./types"
+import { getPresignedUrl, uploadToS3, deleteFromS3 } from "./s3"
 
 export interface ImageJob {
   id: string
   fileName: string
   originalUrl: string
+  remoteUrl?: string
   removedUrl?: string
   status: JobStatus
+  uploadStatus: UploadStatus
   progress: number
   createdAt: number
   completedAt?: number
   error?: string
+  s3Key?: string
 }
 
 interface StoreState {
@@ -20,6 +24,57 @@ interface StoreState {
   removeJob: (id: string) => void
   clearCompleted: () => void
 }
+
+/* ------------------------------------------------------------------ */
+/* Internal upload logic                                               */
+/* ------------------------------------------------------------------ */
+
+async function uploadImage(
+  jobId: string,
+  file: File,
+  update: (fn: (prev: ImageJob[]) => ImageJob[]) => void
+) {
+  try {
+    const { url, remoteUrl, key } = await getPresignedUrl(file.name, file.type)
+
+    update((jobs) =>
+      jobs.map((j) =>
+        j.id === jobId ? { ...j, uploadStatus: "uploading" as UploadStatus } : j
+      )
+    )
+
+    await uploadToS3(url, file)
+
+    update((jobs) =>
+      jobs.map((j) =>
+        j.id === jobId
+          ? {
+              ...j,
+              remoteUrl,
+              s3Key: key,
+              uploadStatus: "uploaded" as UploadStatus,
+              // prefer remote URL so previews load from S3 once available
+              originalUrl: remoteUrl,
+            }
+          : j
+      )
+    )
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Upload failed"
+    update((jobs) =>
+      jobs.map((j) =>
+        j.id === jobId
+          ? { ...j, uploadStatus: "error" as UploadStatus, error: msg }
+          : j
+      )
+    )
+    toast.error(`${file.name} upload failed`, { description: msg })
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Background processing simulation                                      */
+/* ------------------------------------------------------------------ */
 
 function generateId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
@@ -38,7 +93,6 @@ async function simulateRemovedBackground(originalUrl: string): Promise<string> {
         reject(new Error("No canvas context"))
         return
       }
-      // draw checkered transparent background
       const size = 24
       for (let y = 0; y < canvas.height; y += size) {
         for (let x = 0; x < canvas.width; x += size) {
@@ -47,7 +101,6 @@ async function simulateRemovedBackground(originalUrl: string): Promise<string> {
           ctx.fillRect(x, y, size, size)
         }
       }
-      // draw original image with slight desaturation to hint "removed bg"
       const centerX = canvas.width / 2
       const centerY = canvas.height / 2
       const scale = Math.min(
@@ -66,18 +119,28 @@ async function simulateRemovedBackground(originalUrl: string): Promise<string> {
   })
 }
 
+/* ------------------------------------------------------------------ */
+/* Store                                                                */
+/* ------------------------------------------------------------------ */
+
 export const useAppStore = create<StoreState>((set, get) => {
   let intervalId: ReturnType<typeof setInterval> | null = null
+
+  function update(fn: (prev: ImageJob[]) => ImageJob[]) {
+    set((s) => ({ jobs: fn(s.jobs) }))
+  }
 
   function ensureEngine() {
     if (intervalId) return
     intervalId = setInterval(() => {
       const state = get()
-      // find first queued
-      const next = state.jobs.find((j) => j.status === "queued")
+
+      // pick the first queued job whose image is already uploaded
+      const next = state.jobs.find(
+        (j) => j.status === "queued" && j.uploadStatus === "uploaded"
+      )
       if (!next) return
 
-      // mark as processing
       set({
         jobs: state.jobs.map((j) =>
           j.id === next.id
@@ -155,37 +218,75 @@ export const useAppStore = create<StoreState>((set, get) => {
 
   return {
     jobs: [],
-    addJobs: (files) => {
+
+    /** Add files — uploads start immediately; processing starts once uploaded. */
+    addJobs: (files: File[]) => {
       const newJobs: ImageJob[] = files.map((file) => ({
         id: generateId(),
         fileName: file.name,
         originalUrl: URL.createObjectURL(file),
         status: "queued",
+        uploadStatus: "idle",
         progress: 0,
         createdAt: Date.now(),
       }))
+
       set((s) => ({ jobs: [...s.jobs, ...newJobs] }))
       toast.info(
         `${newJobs.length} image${newJobs.length > 1 ? "s" : ""} added to queue`
       )
+
+      // kick off uploads immediately (fire-and-forget)
+      newJobs.forEach((job, i) => {
+        const file = files[i]
+        if (!file) return
+        uploadImage(job.id, file, update).then(() => {
+          // If the job is still queued and now uploaded, it will be picked up
+          // on the next engine tick.
+          ensureEngine()
+        })
+      })
+
       ensureEngine()
     },
+
     removeJob: (id) => {
       set((s) => {
         const target = s.jobs.find((j) => j.id === id)
-        if (target?.originalUrl) URL.revokeObjectURL(target.originalUrl)
-        if (target?.removedUrl) URL.revokeObjectURL(target.removedUrl)
+        if (!target) return s
+
+        // revoke local blob URLs
+        if (target.originalUrl.startsWith("blob:"))
+          URL.revokeObjectURL(target.originalUrl)
+        if (target.removedUrl?.startsWith("blob:"))
+          URL.revokeObjectURL(target.removedUrl)
+
+        // attempt to clean up remote object (best-effort)
+        if (target.s3Key) {
+          deleteFromS3(target.s3Key).catch(() => {
+            // silently ignore — the object will expire via lifecycle rules
+          })
+        }
+
         return { jobs: s.jobs.filter((j) => j.id !== id) }
       })
     },
+
     clearCompleted: () => {
       set((s) => {
         const completed = s.jobs.filter(
           (j) => j.status === "done" || j.status === "error"
         )
         completed.forEach((j) => {
-          if (j.originalUrl) URL.revokeObjectURL(j.originalUrl)
-          if (j.removedUrl) URL.revokeObjectURL(j.removedUrl)
+          if (j.originalUrl?.startsWith("blob:"))
+            URL.revokeObjectURL(j.originalUrl)
+          if (j.removedUrl?.startsWith("blob:"))
+            URL.revokeObjectURL(j.removedUrl)
+          if (j.s3Key) {
+            deleteFromS3(j.s3Key).catch(() => {
+              // best-effort cleanup
+            })
+          }
         })
         return {
           jobs: s.jobs.filter(
