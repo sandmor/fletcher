@@ -3,11 +3,36 @@ import requests
 import time
 import logging
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-image = modal.Image.debian_slim(python_version="3.11").uv_sync()
+def download_model():
+    """
+    Downloads the weights and bakes them into the Modal image.
+    This replaces the old @modal.build() class method.
+    """
+    import rembg
+    rembg.new_session("birefnet-massive")
 
-app = modal.App(name="image-processor", image=image)
+model_volume = modal.Volume.from_name("rembg-models", create_if_missing=True)
+
+VOLUME_PATH = "/data/models"
+
+api_image = modal.Image.debian_slim(python_version="3.11").uv_sync()
+
+gpu_image = (
+    modal.Image.from_registry(
+        "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04", 
+        add_python="3.11"
+    )
+    .apt_install("libgl1", "libglib2.0-0")
+    .uv_sync()
+    .env({
+        "U2NET_HOME": VOLUME_PATH
+    })
+)
+
+app = modal.App(name="image-processor", image=api_image)
 
 def _send_callback(
     callback_url: str,
@@ -44,49 +69,81 @@ def _send_callback(
 
     logger.error(f"Callback failed after {max_retries} attempts. Last error: {last_error}")
 
+@app.cls(gpu="L4", scaledown_window=300, max_containers=1, image=gpu_image, volumes={VOLUME_PATH: model_volume}, enable_memory_snapshot=True)
+class BiRefNetProcessor:
+    @modal.enter(snap=True)
+    def pre_warm_imports(self):
+        logger.info("Build Phase: Freezing heavy imports into memory...")
+        import rembg
 
-@app.function()
-def process_image_background(
-    job_id: str,
-    input_url: str,
-    upload_url: str,
-    download_url: str,
-    callback_url: str,
-    callback_secret: str | None = None,
-):
-    try:
-        _send_callback(callback_url, {"jobId": job_id, "status": "processing"}, callback_secret)
+    @modal.enter()
+    def load_model(self):
+        """
+        Runs when a new container spins up. 
+        Loads the session into GPU VRAM.
+        """
+        import rembg
+        
+        logger.info(f"Runtime Phase: Loading BiRefNet from {VOLUME_PATH}...")
+        self.session = rembg.new_session("birefnet-massive")
+        logger.info("Model loaded successfully.")
 
-        # TODO: Replace this placeholder with actual background-removal logic.
-        # For now, download the input image and re-upload it so the output URL works.
-        input_response = requests.get(input_url, timeout=60)
-        input_response.raise_for_status()
-        requests.put(
-            upload_url,
-            data=input_response.content,
-            headers={"Content-Type": "image/png"},
-            timeout=120,
-        )
+    @modal.method()
+    def process_image_background(
+        self,
+        job_id: str,
+        input_url: str,
+        upload_url: str,
+        download_url: str,
+        callback_url: str,
+        callback_secret: str | None = None,
+    ):
+        try:
+            _send_callback(callback_url, {"jobId": job_id, "status": "processing"}, callback_secret)
 
-        _send_callback(
-            callback_url,
-            {"jobId": job_id, "status": "completed", "outputUrl": download_url},
-            callback_secret,
-        )
-    except Exception:
-        import traceback
-        traceback.print_exc()
-        _send_callback(
-            callback_url,
-            {"jobId": job_id, "status": "failed", "error": "Processing failed"},
-            callback_secret,
-        )
+            # Download the input image
+            input_response = requests.get(input_url, timeout=60)
+            input_response.raise_for_status()
 
+            # Process the image automatically via our pre-loaded session
+            import rembg
+            output_bytes = rembg.remove(
+                input_response.content, 
+                session=self.session,
+                alpha_matting=True,
+                alpha_matting_foreground_threshold=240, # Pixels above this are strictly foreground
+                alpha_matting_background_threshold=10,  # Pixels below this are strictly background
+                alpha_matting_erode_size=10             # How much to erode the boundary to calculate the soft edge
+            )
 
+            # Upload the processed image
+            upload_response = requests.put(
+                upload_url,
+                data=output_bytes,
+                headers={"Content-Type": "image/png"},
+                timeout=120,
+            )
+            upload_response.raise_for_status()
+
+            _send_callback(
+                callback_url,
+                {"jobId": job_id, "status": "completed", "outputUrl": download_url},
+                callback_secret,
+            )
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            _send_callback(
+                callback_url,
+                {"jobId": job_id, "status": "failed", "error": str(e)},
+                callback_secret,
+            )
+
+# 3. The trigger endpoint
 @app.function()
 @modal.fastapi_endpoint(method="POST")
 def trigger_job(data: dict):
-    process_image_background.spawn(
+    BiRefNetProcessor().process_image_background.spawn(
         data["jobId"],
         data["inputUrl"],
         data["uploadUrl"],

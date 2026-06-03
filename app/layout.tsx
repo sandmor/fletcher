@@ -34,7 +34,7 @@ export default function RootLayout({
       <body>
         <ConvexClientProvider>
           <ThemeProvider>
-            <Toaster position="bottom-right" richColors closeButton />
+            <Toaster position="top-right" richColors closeButton />
             <ThemeHotkey />
             <PageHeader />
             {children}

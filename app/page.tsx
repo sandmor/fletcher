@@ -52,7 +52,7 @@ export default function UploadPage() {
           <ImageUp className="h-8 w-8" />
         </div>
         <h1 className="max-w-lg text-3xl font-semibold tracking-tight sm:text-4xl">
-          Remove backgrounds instantly
+          Remove backgrounds automatically
         </h1>
         <p className="max-w-md text-muted-foreground">
           Drag and drop your images here, upload them, then submit a job to
