@@ -42,7 +42,7 @@ export function ThemeHotkey() {
     function onKeyDown(event: KeyboardEvent) {
       if (event.defaultPrevented || event.repeat) return
       if (event.metaKey || event.ctrlKey || event.altKey) return
-      if (event.key.toLowerCase() !== "d") return
+      if (event.key?.toLowerCase() !== "d") return
       if (isTypingTarget(event.target)) return
       setTheme(resolvedTheme === "dark" ? "light" : "dark")
     }
@@ -58,19 +58,17 @@ export function ThemeToggle({ className }: { className?: string }) {
   return (
     <Button
       variant="outline"
-      size="sm"
+      size="icon"
       aria-label="Toggle theme"
       onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
-      className={cn("gap-2", className)}
+      className={cn("h-8 w-8 rounded-full", className)}
     >
       {resolvedTheme === "dark" ? (
-        <Sun className="h-4 w-4" />
+        <Sun className="h-4 w-4 text-muted-foreground transition-all hover:text-foreground" />
       ) : (
-        <Moon className="h-4 w-4" />
+        <Moon className="h-4 w-4 text-muted-foreground transition-all hover:text-foreground" />
       )}
-      <span className="hidden sm:inline">
-        {resolvedTheme === "dark" ? "Light" : "Dark"}
-      </span>
+      <span className="sr-only">Toggle theme</span>
     </Button>
   )
 }

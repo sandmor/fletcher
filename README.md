@@ -15,17 +15,19 @@ bun run dev
 
 Set the variables in `.env.local`:
 
-| Variable                | Required | Description                                                               |
-| ----------------------- | -------- | ------------------------------------------------------------------------- |
-| `S3_BUCKET_NAME`        | **Yes**  | Target bucket                                                             |
-| `S3_ACCESS_KEY_ID`      | **Yes**  | Access key                                                                |
-| `S3_SECRET_ACCESS_KEY`  | **Yes**  | Secret key                                                                |
-| `S3_REGION`             | No       | Region (default: `auto`)                                                  |
-| `S3_ENDPOINT`           | No       | Custom endpoint for MinIO / R2 / etc.                                     |
-| `S3_PUBLIC_URL_BASE`    | **Yes**  | Public-read URL base for generated object URLs                            |
-| `S3_FORCE_PATH_STYLE`   | No       | Force path-style URLs (`true` / `false`, default: inferred from endpoint) |
-| `MODAL_ENDPOINT_URL`    | **Yes**  | Deployed Modal web endpoint (`…/trigger_job`)                             |
-| `MODAL_CALLBACK_SECRET` | **Yes**  | Shared secret used to authenticate Modal -> Convex webhook callbacks      |
+| Variable                            | Required | Description                                                               |
+| ----------------------------------- | -------- | ------------------------------------------------------------------------- |
+| `S3_BUCKET_NAME`                    | **Yes**  | Target bucket                                                             |
+| `S3_ACCESS_KEY_ID`                  | **Yes**  | Access key                                                                |
+| `S3_SECRET_ACCESS_KEY`              | **Yes**  | Secret key                                                                |
+| `S3_REGION`                         | No       | Region (default: `auto`)                                                  |
+| `S3_ENDPOINT`                       | No       | Custom endpoint for MinIO / R2 / etc.                                     |
+| `S3_PUBLIC_URL_BASE`                | **Yes**  | Public-read URL base for generated object URLs                            |
+| `S3_FORCE_PATH_STYLE`               | No       | Force path-style URLs (`true` / `false`, default: inferred from endpoint) |
+| `MODAL_ENDPOINT_URL`                | **Yes**  | Deployed Modal web endpoint (`…/trigger_job`)                             |
+| `MODAL_CALLBACK_SECRET`             | **Yes**  | Shared secret used to authenticate Modal -> Convex webhook callbacks      |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | **Yes**  | Clerk publishable key                                                     |
+| `CLERK_SECRET_KEY`                  | **Yes**  | Clerk secret key                                                          |
 
 ### Cloudflare R2
 
@@ -45,9 +47,25 @@ S3_ACCESS_KEY_ID=<r2-access-key>
 S3_SECRET_ACCESS_KEY=<r2-secret-key>
 S3_PUBLIC_URL_BASE=https://cdn.example.com
 MODAL_CALLBACK_SECRET=your-random-secret-here
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
 ```
 
 The presigned PUT URL is generated server-side, so the client uploads directly to R2, and the server never proxies binary data.
+
+## Authentication
+
+The app uses [Clerk](https://clerk.dev) for user authentication. You need to create a Clerk application and add the API keys to your `.env.local`.
+
+1. Go to the [Clerk Dashboard](https://dashboard.clerk.dev) and create a new application.
+2. Copy **Publishable key** and **Secret key** into your `.env.local`:
+
+```env
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+```
+
+These values match the app’s hardcoded routes, so the app works out of the box once the two Clerk keys above are set.
 
 ## Modal job processor
 

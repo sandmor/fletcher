@@ -3,7 +3,6 @@
 import * as React from "react"
 import { useQuery, useMutation, useAction } from "convex/react"
 import { api } from "@/convex/_generated/api"
-import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import {
@@ -11,16 +10,8 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
-import {
-  List,
-  ChevronDown,
-  ChevronUp,
-  Trash2,
-  CheckCircle2,
-  AlertCircle,
-  Loader2,
-  Clock,
-} from "lucide-react"
+import { List, ChevronDown, ChevronUp, Loader2, X } from "lucide-react"
+import { cn } from "@/lib/utils"
 
 export function QueueWidget() {
   const jobs = useQuery(api.jobs.getQueue) ?? []
@@ -43,85 +34,104 @@ export function QueueWidget() {
     [cleanupJobS3, deleteJob]
   )
 
+  if (jobs.length === 0) return null
+
   return (
     <div className="fixed right-6 bottom-6 z-50 flex flex-col items-end">
-      <Collapsible open={open} onOpenChange={setOpen} className="w-80">
-        <CollapsibleContent>
-          <div className="mb-3 overflow-hidden rounded-xl border bg-card text-card-foreground shadow-xl">
-            <div className="flex items-center justify-between border-b px-4 py-3">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <List className="h-4 w-4 text-muted-foreground" />
-                Jobs
-                <span className="text-muted-foreground">({jobs.length})</span>
+      <Collapsible open={open} onOpenChange={setOpen} className="group w-80">
+        <CollapsibleContent className="duration-300 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-bottom-2 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-bottom-2">
+          <div className="mb-4 overflow-hidden rounded-2xl border border-border/50 bg-card/95 text-card-foreground shadow-2xl backdrop-blur-xl">
+            <div className="flex items-center justify-between border-b border-border/50 bg-muted/30 px-4 py-3">
+              <div className="flex items-center gap-2.5 text-sm font-semibold">
+                <div className="flex h-6 w-6 items-center justify-center rounded-md border border-border bg-background shadow-sm">
+                  <List className="h-3.5 w-3.5 text-foreground" />
+                </div>
+                Queue
+                <span className="flex h-5 items-center justify-center rounded-full bg-muted px-2 text-[10px] font-medium text-muted-foreground">
+                  {jobs.length} total
+                </span>
               </div>
               {(completed.length > 0 || failed.length > 0) && (
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
-                  className="h-7 text-xs"
+                  className="h-7 border-dashed border-border/60 px-2.5 text-xs font-medium hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
                   onClick={() => clearCompleted()}
                 >
-                  Clear completed
+                  Clear finished
                 </Button>
               )}
             </div>
-            <ScrollArea className="max-h-80">
-              {jobs.length === 0 ? (
-                <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-                  No jobs in queue.
-                </div>
-              ) : (
-                <ul className="divide-y">
-                  {jobs.map((job) => (
-                    <li key={job._id} className="px-4 py-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium">
-                            {job.fileName}
-                          </p>
-                          <div className="mt-1 flex items-center gap-2">
-                            <StatusBadge status={job.status} />
-                          </div>
+            <ScrollArea className="max-h-87.5">
+              <ul className="divide-y divide-border/30">
+                {jobs.map((job) => (
+                  <li
+                    key={job._id}
+                    className="group/item flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30"
+                  >
+                    <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md border border-border/50 bg-muted">
+                      <img
+                        src={job.inputUrl}
+                        alt={job.fileName}
+                        className="h-full w-full object-cover"
+                      />
+                      {job.status === "processing" && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-background/50 backdrop-blur-[1px]">
+                          <Loader2 className="h-4 w-4 animate-spin text-primary" />
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 shrink-0"
-                          onClick={() => handleDelete(job)}
-                          aria-label="Remove job"
-                        >
-                          <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-                        </Button>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-foreground">
+                        {job.fileName}
+                      </p>
+                      <div className="mt-0.5 flex items-center gap-1.5">
+                        <StatusIndicator status={job.status} />
                       </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/item:opacity-100 hover:bg-destructive/10 hover:text-destructive"
+                      onClick={() => handleDelete(job)}
+                      aria-label="Remove job"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
             </ScrollArea>
           </div>
         </CollapsibleContent>
 
         <CollapsibleTrigger asChild>
           <Button
-            variant="secondary"
-            className="w-full justify-between shadow-lg"
+            size="lg"
+            className={cn(
+              "h-12 w-full justify-between rounded-full px-5 shadow-xl transition-all duration-300",
+              open
+                ? "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                : "bg-primary text-primary-foreground hover:bg-primary/90"
+            )}
           >
-            <span className="flex items-center gap-2">
-              <List className="h-4 w-4" />
-              QUEUE
-              {activeCount > 0 && (
-                <Badge
-                  variant="default"
-                  className="ml-1 px-1.5 py-0 text-[10px]"
-                >
+            <span className="flex items-center gap-2.5 font-semibold tracking-wide">
+              {open ? (
+                <List className="h-4 w-4" />
+              ) : (
+                <List className="h-4 w-4" />
+              )}
+              {open ? "HIDE QUEUE" : "SHOW QUEUE"}
+              {!open && activeCount > 0 && (
+                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-background px-1.5 text-[11px] font-bold text-foreground">
                   {activeCount}
-                </Badge>
+                </span>
               )}
             </span>
             {open ? (
-              <ChevronDown className="h-4 w-4" />
+              <ChevronDown className="h-5 w-5" />
             ) : (
-              <ChevronUp className="h-4 w-4" />
+              <ChevronUp className="h-5 w-5" />
             )}
           </Button>
         </CollapsibleTrigger>
@@ -130,41 +140,42 @@ export function QueueWidget() {
   )
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<
-    string,
-    {
-      icon: React.ReactNode
-      label: string
-      variant: "default" | "secondary" | "destructive" | "outline"
-    }
-  > = {
-    pending: {
-      icon: <Clock className="h-3 w-3" />,
-      label: "Pending",
-      variant: "secondary",
-    },
-    processing: {
-      icon: <Loader2 className="h-3 w-3 animate-spin" />,
-      label: "Processing",
-      variant: "default",
-    },
-    completed: {
-      icon: <CheckCircle2 className="h-3 w-3" />,
-      label: "Completed",
-      variant: "outline",
-    },
-    failed: {
-      icon: <AlertCircle className="h-3 w-3" />,
-      label: "Failed",
-      variant: "destructive",
-    },
+function StatusIndicator({ status }: { status: string }) {
+  if (status === "completed") {
+    return (
+      <>
+        <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+        <span className="text-[11px] font-medium text-muted-foreground">
+          Ready
+        </span>
+      </>
+    )
   }
-  const entry = map[status] ?? map.pending
-  return (
-    <Badge variant={entry.variant} className="gap-1 px-1.5 py-0 text-[10px]">
-      {entry.icon}
-      {entry.label}
-    </Badge>
-  )
+  if (status === "processing") {
+    return (
+      <>
+        <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+        <span className="text-[11px] font-medium text-primary">Processing</span>
+      </>
+    )
+  }
+  if (status === "pending") {
+    return (
+      <>
+        <div className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
+        <span className="text-[11px] font-medium text-muted-foreground">
+          Pending
+        </span>
+      </>
+    )
+  }
+  if (status === "failed") {
+    return (
+      <>
+        <div className="h-1.5 w-1.5 rounded-full bg-destructive" />
+        <span className="text-[11px] font-medium text-destructive">Failed</span>
+      </>
+    )
+  }
+  return null
 }

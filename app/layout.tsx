@@ -1,19 +1,20 @@
-import { Geist, Geist_Mono } from "next/font/google"
+import { Outfit } from "next/font/google"
+import type { Metadata } from "next"
 
 import "./globals.css"
 import { ThemeProvider, ThemeHotkey } from "@/components/theme-provider"
-import { PageHeader } from "@/components/page-header"
-import { QueueWidget } from "@/components/queue-widget"
 import { Toaster } from "@/components/ui/sonner"
 import { cn } from "@/lib/utils"
 import { ConvexClientProvider } from "@/components/convex-client-provider"
+import { ClerkProvider } from "@clerk/nextjs"
 
-const geist = Geist({ subsets: ["latin"], variable: "--font-sans" })
+const outfit = Outfit({ subsets: ["latin"], variable: "--font-sans" })
 
-const fontMono = Geist_Mono({
-  subsets: ["latin"],
-  variable: "--font-mono",
-})
+export const metadata: Metadata = {
+  title: "Fletcher — Background Removal",
+  description:
+    "Remove backgrounds from your images automatically. Upload, process, and download — all in seconds.",
+}
 
 export default function RootLayout({
   children,
@@ -24,22 +25,17 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={cn(
-        "antialiased",
-        fontMono.variable,
-        "font-sans",
-        geist.variable
-      )}
+      className={cn("font-sans", outfit.variable)}
     >
       <body>
         <ConvexClientProvider>
-          <ThemeProvider>
-            <Toaster position="top-right" richColors closeButton />
-            <ThemeHotkey />
-            <PageHeader />
-            {children}
-            <QueueWidget />
-          </ThemeProvider>
+          <ClerkProvider>
+            <ThemeProvider>
+              <Toaster position="top-right" richColors closeButton />
+              <ThemeHotkey />
+              {children}
+            </ThemeProvider>
+          </ClerkProvider>
         </ConvexClientProvider>
       </body>
     </html>

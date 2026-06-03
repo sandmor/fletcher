@@ -1,14 +1,12 @@
 "use client"
 
 import { useCallback } from "react"
-import { useRouter } from "next/navigation"
 import { useDropzone } from "react-dropzone"
 import { useUploadQueue } from "@/hooks/use-upload-queue"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import {
-  ImageUp,
   Upload,
   X,
   Loader2,
@@ -19,7 +17,6 @@ import {
 } from "lucide-react"
 
 export default function UploadPage() {
-  const router = useRouter()
   const {
     items,
     addFiles,
@@ -46,34 +43,42 @@ export default function UploadPage() {
   })
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-10 sm:px-6 lg:px-8">
-      <div className="flex flex-col items-center gap-6 text-center">
-        <div className="rounded-2xl border bg-primary p-4 text-primary-foreground shadow-lg">
-          <ImageUp className="h-8 w-8" />
+    <main className="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:px-8">
+      <div className="animate-fade-in flex flex-col gap-8">
+        <div className="space-y-3 text-center">
+          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
+            Remove backgrounds
+          </h1>
+          <p className="mx-auto max-w-xl text-lg text-muted-foreground">
+            Drop your images below. We&apos;ll handle the rest.
+          </p>
         </div>
-        <h1 className="max-w-lg text-3xl font-semibold tracking-tight sm:text-4xl">
-          Remove backgrounds automatically
-        </h1>
-        <p className="max-w-md text-muted-foreground">
-          Drag and drop your images here, upload them, then submit a job to
-          process them in the background.
-        </p>
 
         <Card
           {...getRootProps()}
           className={cn(
-            "w-full cursor-pointer border-2 border-dashed transition-colors",
+            "w-full cursor-pointer border-2 border-dashed transition-all duration-200",
             isDragActive
-              ? "border-primary bg-primary/5"
-              : "border-muted-foreground/25 bg-card hover:border-muted-foreground/40"
+              ? "scale-[1.02] border-primary bg-primary/5"
+              : "border-border bg-card hover:border-primary/50 hover:bg-accent/30"
           )}
         >
-          <CardContent className="flex flex-col items-center justify-center gap-4 py-16">
+          <CardContent className="flex flex-col items-center justify-center gap-6 py-20">
             <input {...getInputProps()} />
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted">
-              <Upload className="h-8 w-8 text-muted-foreground" />
+            <div
+              className={cn(
+                "flex h-20 w-20 items-center justify-center rounded-full transition-colors",
+                isDragActive ? "bg-primary/20" : "bg-muted"
+              )}
+            >
+              <Upload
+                className={cn(
+                  "h-10 w-10 transition-colors",
+                  isDragActive ? "text-primary" : "text-muted-foreground"
+                )}
+              />
             </div>
-            <div className="text-sm text-muted-foreground">
+            <div className="text-base font-medium text-muted-foreground">
               {isDragActive
                 ? "Drop the images here ..."
                 : "Drop images here or click to browse"}
@@ -81,7 +86,6 @@ export default function UploadPage() {
             <Button
               variant="outline"
               size="sm"
-              className="mt-2"
               onClick={(e) => {
                 e.stopPropagation()
                 open()
@@ -93,71 +97,73 @@ export default function UploadPage() {
         </Card>
 
         {items.length > 0 && (
-          <div className="w-full space-y-4 text-left">
+          <div className="animate-slide-up w-full space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium">Upload queue</span>
-                <span className="text-xs text-muted-foreground">
-                  ({items.length})
+                <span className="text-sm font-semibold">Upload queue</span>
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-xs font-medium text-accent-foreground">
+                  {items.length}
                 </span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 {uploadingCount > 0 && (
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Loader2 className="h-3 w-3 animate-spin" />
+                  <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
                     Uploading {uploadingCount}…
                   </span>
                 )}
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-7 text-xs"
+                  className="h-8 text-xs hover:bg-destructive/10 hover:text-destructive"
                   onClick={clearAll}
                 >
-                  <Trash2 className="mr-1 h-3 w-3" />
-                  Clear
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                  Clear all
                 </Button>
               </div>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-3">
               {items.map((item) => (
                 <div
                   key={item.id}
-                  className="flex items-center gap-3 rounded-lg border bg-card p-3 pr-4 shadow-sm"
+                  className="group animate-fade-in flex items-center gap-4 rounded-xl border bg-card p-3 shadow-sm transition-all hover:shadow-md"
                 >
-                  <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md bg-muted">
+                  <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-border/50 bg-muted">
                     <img
                       src={item.previewUrl}
                       alt={item.fileName}
                       className="h-full w-full object-cover"
                     />
+                    {item.status === "uploading" && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-background/50 backdrop-blur-[1px]">
+                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                      </div>
+                    )}
                   </div>
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <p className="truncate text-sm font-medium">
+                  <div className="flex min-w-0 flex-1 flex-col justify-center">
+                    <p className="truncate text-sm font-medium text-foreground">
                       {item.fileName}
                     </p>
-                    <div className="mt-0.5 flex items-center gap-1.5">
+                    <div className="mt-1 flex items-center gap-1.5">
                       {item.status === "uploading" && (
-                        <>
-                          <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-                          <span className="text-xs text-muted-foreground">
-                            Uploading…
-                          </span>
-                        </>
+                        <span className="text-xs font-medium text-primary">
+                          Uploading…
+                        </span>
                       )}
                       {item.status === "uploaded" && (
                         <>
-                          <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-                          <span className="text-xs text-emerald-600">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                          <span className="text-xs font-medium text-emerald-600">
                             Ready
                           </span>
                         </>
                       )}
                       {item.status === "error" && (
                         <>
-                          <AlertCircle className="h-3 w-3 text-destructive" />
-                          <span className="text-xs text-destructive">
+                          <AlertCircle className="h-3.5 w-3.5 text-destructive" />
+                          <span className="text-xs font-medium text-destructive">
                             {item.error}
                           </span>
                         </>
@@ -167,36 +173,29 @@ export default function UploadPage() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-7 w-7 shrink-0"
+                    className="h-8 w-8 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
                     onClick={() => removeItem(item.id)}
                     aria-label="Remove upload"
                   >
-                    <X className="h-3.5 w-3.5 text-muted-foreground" />
+                    <X className="h-4 w-4" />
                   </Button>
                 </div>
               ))}
             </div>
 
             <Button
-              className="w-full"
+              size="lg"
+              className="mt-2 w-full text-base shadow-lg transition-all hover:shadow-xl"
               disabled={!canSubmit}
               onClick={() => submitAll()}
             >
-              <Send className="mr-2 h-4 w-4" />
+              <Send className="mr-2 h-5 w-5" />
               {uploadingCount > 0
                 ? `Waiting for ${uploadingCount} upload${uploadingCount > 1 ? "s" : ""}…`
                 : `Submit ${readyCount} job${readyCount > 1 ? "s" : ""}`}
             </Button>
           </div>
         )}
-
-        <Button
-          variant="link"
-          size="sm"
-          onClick={() => router.push("/results")}
-        >
-          View results →
-        </Button>
       </div>
     </main>
   )
