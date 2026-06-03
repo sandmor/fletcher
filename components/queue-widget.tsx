@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useQuery, useMutation, useAction } from "convex/react"
+import { usePaginatedQuery, useAction } from "convex/react"
 import { api } from "@/convex/_generated/api"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
@@ -14,11 +14,17 @@ import { List, ChevronDown, ChevronUp, Loader2, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export function QueueWidget() {
-  const jobs = useQuery(api.jobs.getQueue) ?? []
-  const deleteJob = useMutation(api.jobs.deleteJob)
-  const cleanupJobS3 = useAction(api.jobs.cleanupJobS3)
-  const clearCompleted = useMutation(api.jobs.clearCompleted)
+  const {
+    results: jobs,
+    status,
+    loadMore,
+  } = usePaginatedQuery(api.jobs.getQueue, {}, { initialNumItems: 20 })
+
+  const deleteJobAndFiles = useAction(api.jobs.deleteJobAndFiles)
+  const clearCompletedWithFiles = useAction(api.jobs.clearCompletedWithFiles)
+
   const [open, setOpen] = React.useState(true)
+  const [isClearing, setIsClearing] = React.useState(false)
 
   const pending = jobs.filter((j) => j.status === "pending")
   const processing = jobs.filter((j) => j.status === "processing")
@@ -28,19 +34,34 @@ export function QueueWidget() {
 
   const handleDelete = React.useCallback(
     async (job: (typeof jobs)[number]) => {
-      await cleanupJobS3({ inputUrl: job.inputUrl, outputUrl: job.outputUrl })
-      await deleteJob({ jobId: job._id })
+      try {
+        await deleteJobAndFiles({ jobId: job._id })
+      } catch (err) {
+        console.error("Failed to delete job:", err)
+      }
     },
-    [cleanupJobS3, deleteJob]
+    [deleteJobAndFiles]
   )
 
-  if (jobs.length === 0) return null
+  const handleClearFinished = React.useCallback(async () => {
+    setIsClearing(true)
+    try {
+      await clearCompletedWithFiles()
+    } catch (err) {
+      console.error("Failed to clear jobs:", err)
+    } finally {
+      setIsClearing(false)
+    }
+  }, [clearCompletedWithFiles])
+
+  if (jobs.length === 0 && status === "LoadingFirstPage") return null
 
   return (
     <div className="fixed right-6 bottom-6 z-50 flex flex-col items-end">
       <Collapsible open={open} onOpenChange={setOpen} className="group w-80">
         <CollapsibleContent className="duration-300 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-bottom-2 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-bottom-2">
           <div className="mb-4 overflow-hidden rounded-2xl border border-border/50 bg-card/95 text-card-foreground shadow-2xl backdrop-blur-xl">
+            {/* Header section */}
             <div className="flex items-center justify-between border-b border-border/50 bg-muted/30 px-4 py-3">
               <div className="flex items-center gap-2.5 text-sm font-semibold">
                 <div className="flex h-6 w-6 items-center justify-center rounded-md border border-border bg-background shadow-sm">
@@ -48,20 +69,27 @@ export function QueueWidget() {
                 </div>
                 Queue
                 <span className="flex h-5 items-center justify-center rounded-full bg-muted px-2 text-[10px] font-medium text-muted-foreground">
-                  {jobs.length} total
+                  {jobs.length}
+                  {status === "CanLoadMore" ? "+" : ""} total
                 </span>
               </div>
               {(completed.length > 0 || failed.length > 0) && (
                 <Button
                   variant="outline"
                   size="sm"
+                  disabled={isClearing}
                   className="h-7 border-dashed border-border/60 px-2.5 text-xs font-medium hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
-                  onClick={() => clearCompleted()}
+                  onClick={handleClearFinished}
                 >
+                  {isClearing ? (
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  ) : null}
                   Clear finished
                 </Button>
               )}
             </div>
+
+            {/* List and Infinite Scroll area */}
             <ScrollArea className="max-h-87.5">
               <ul className="divide-y divide-border/30">
                 {jobs.map((job) => (
@@ -101,10 +129,32 @@ export function QueueWidget() {
                   </li>
                 ))}
               </ul>
+
+              {/* Load more triggers */}
+              {status === "CanLoadMore" && (
+                <div className="flex justify-center border-t border-border/20 bg-muted/10 p-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-full text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => loadMore(20)}
+                  >
+                    Load older jobs
+                  </Button>
+                </div>
+              )}
+
+              {status === "LoadingMore" && (
+                <div className="flex items-center justify-center gap-2 border-t border-border/20 p-3 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                  Loading...
+                </div>
+              )}
             </ScrollArea>
           </div>
         </CollapsibleContent>
 
+        {/* Sticky Trigger bar */}
         <CollapsibleTrigger asChild>
           <Button
             size="lg"
@@ -116,14 +166,10 @@ export function QueueWidget() {
             )}
           >
             <span className="flex items-center gap-2.5 font-semibold tracking-wide">
-              {open ? (
-                <List className="h-4 w-4" />
-              ) : (
-                <List className="h-4 w-4" />
-              )}
+              <List className="h-4 w-4" />
               {open ? "HIDE QUEUE" : "SHOW QUEUE"}
               {!open && activeCount > 0 && (
-                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-background px-1.5 text-[11px] font-bold text-foreground">
+                <span className="flex h-5 min-w-5 animate-pulse items-center justify-center rounded-full bg-background px-1.5 text-[11px] font-bold text-foreground">
                   {activeCount}
                 </span>
               )}

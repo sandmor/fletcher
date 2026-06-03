@@ -2,36 +2,40 @@
 
 import Link from "next/link"
 import { useMemo, useState } from "react"
-import { useQuery } from "convex/react"
+import { usePaginatedQuery } from "convex/react"
 import { api } from "@/convex/_generated/api"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Clock, AlertCircle, Loader2, ImageOff, Download } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Doc } from "@/convex/_generated/dataModel"
 
 type Filter = "all" | "completed" | "processing" | "pending" | "failed"
 
 export default function ResultsPage() {
-  const jobs = useQuery(api.jobs.getQueue) ?? []
+  const {
+    results: jobs,
+    status,
+    loadMore,
+  } = usePaginatedQuery(api.jobs.getQueue, {}, { initialNumItems: 12 })
+
   const [filter, setFilter] = useState<Filter>("all")
 
-  const jobsMemo = useMemo(() => jobs, [jobs])
-
   const filtered = useMemo(() => {
-    if (filter === "all") return jobsMemo
-    return jobsMemo.filter((j) => j.status === filter)
-  }, [jobsMemo, filter])
+    if (filter === "all") return jobs
+    return jobs.filter((j) => j.status === filter)
+  }, [jobs, filter])
 
   const counts = useMemo(() => {
     return {
-      all: jobsMemo.length,
-      completed: jobsMemo.filter((j) => j.status === "completed").length,
-      processing: jobsMemo.filter((j) => j.status === "processing").length,
-      pending: jobsMemo.filter((j) => j.status === "pending").length,
-      failed: jobsMemo.filter((j) => j.status === "failed").length,
+      all: jobs.length,
+      completed: jobs.filter((j) => j.status === "completed").length,
+      processing: jobs.filter((j) => j.status === "processing").length,
+      pending: jobs.filter((j) => j.status === "pending").length,
+      failed: jobs.filter((j) => j.status === "failed").length,
     }
-  }, [jobsMemo])
+  }, [jobs])
 
   const tabs: { value: Filter; label: string; count: number }[] = [
     { value: "all", label: "All", count: counts.all },
@@ -69,13 +73,21 @@ export default function ResultsPage() {
                   )}
                 >
                   {tab.count}
+                  {status === "CanLoadMore" && "+"}
                 </span>
               </button>
             ))}
           </div>
         </div>
 
-        {filtered.length === 0 ? (
+        {status === "LoadingFirstPage" ? (
+          <div className="flex min-h-100 flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-border/50 bg-card/10">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-sm font-medium text-muted-foreground">
+              Loading your jobs...
+            </p>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="animate-fade-in flex flex-col items-center justify-center gap-5 rounded-2xl border-2 border-dashed border-border/50 bg-card/50 py-24 text-center">
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted">
               <ImageOff className="h-8 w-8 text-muted-foreground" />
@@ -83,7 +95,7 @@ export default function ResultsPage() {
             <div className="flex flex-col gap-1">
               <h3 className="text-lg font-semibold">No images found</h3>
               <p className="text-sm text-muted-foreground">
-                No images match this filter. Try changing your selection.
+                No images match this filter in your loaded items.
               </p>
             </div>
             <Button asChild variant="outline" className="mt-2">
@@ -91,10 +103,33 @@ export default function ResultsPage() {
             </Button>
           </div>
         ) : (
-          <div className="animate-fade-in grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {filtered.map((job) => (
-              <JobCard key={job._id} job={job} />
-            ))}
+          <div className="flex flex-col gap-8">
+            <div className="animate-fade-in grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {filtered.map((job) => (
+                <JobCard key={job._id} job={job} />
+              ))}
+            </div>
+
+            {status === "CanLoadMore" && (
+              <div className="flex justify-center pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => loadMore(12)}
+                  className="min-w-37.5"
+                >
+                  Load More
+                </Button>
+              </div>
+            )}
+
+            {status === "LoadingMore" && (
+              <div className="flex justify-center pt-4">
+                <Button variant="outline" disabled className="min-w-37.5">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Loading…
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -102,13 +137,7 @@ export default function ResultsPage() {
   )
 }
 
-function JobCard({
-  job,
-}: {
-  job: NonNullable<
-    ReturnType<typeof useQuery<typeof api.jobs.getQueue>>
-  >[number]
-}) {
+function JobCard({ job }: { job: Doc<"jobs"> }) {
   const showResult = job.status === "completed" && job.outputUrl
   const isFailed = job.status === "failed"
   const isPendingOrProcessing =

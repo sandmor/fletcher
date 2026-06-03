@@ -3,6 +3,7 @@ import { v } from "convex/values"
 
 export default defineSchema({
   jobs: defineTable({
+    userId: v.string(),
     status: v.union(
       v.literal("pending"),
       v.literal("processing"),
@@ -13,5 +14,5 @@ export default defineSchema({
     outputUrl: v.optional(v.string()),
     error: v.optional(v.string()),
     fileName: v.string(),
-  }).index("by_status", ["status"]),
+  }).index("by_user_and_status", ["userId", "status"]),
 })

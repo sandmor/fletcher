@@ -1,4 +1,10 @@
-import { mutation, query, action } from "./_generated/server"
+import {
+  mutation,
+  query,
+  action,
+  internalMutation,
+  internalQuery,
+} from "./_generated/server"
 import { v } from "convex/values"
 import {
   S3Client,
@@ -6,6 +12,8 @@ import {
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
+import { internal } from "./_generated/api"
+import { paginationOptsValidator } from "convex/server"
 
 const storageClient = new S3Client({
   region: process.env.S3_REGION || "auto",
@@ -26,6 +34,11 @@ function getPublicUrl(fileKey: string): string {
 export const getFrontendUploadUrl = action({
   args: { filename: v.string(), contentType: v.string() },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) {
+      throw new Error("Unauthorized")
+    }
+
     const fileKey = `inputs/${Date.now()}-${args.filename}`
     const command = new PutObjectCommand({
       Bucket: process.env.S3_BUCKET_NAME!,
@@ -46,7 +59,15 @@ export const getFrontendUploadUrl = action({
 export const createJob = mutation({
   args: { inputUrl: v.string(), fileName: v.string() },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) {
+      throw new Error("Unauthorized")
+    }
+
+    const clerkUserId = identity.subject
+
     return await ctx.db.insert("jobs", {
+      userId: clerkUserId,
       status: "pending",
       inputUrl: args.inputUrl,
       fileName: args.fileName,
@@ -57,6 +78,11 @@ export const createJob = mutation({
 export const triggerModalJob = action({
   args: { jobId: v.id("jobs"), inputUrl: v.string() },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) {
+      throw new Error("Unauthorized")
+    }
+
     const outputKey = `outputs/${args.jobId}.png`
 
     const command = new PutObjectCommand({
@@ -93,7 +119,7 @@ export const triggerModalJob = action({
   },
 })
 
-export const updateJob = mutation({
+export const updateJob = internalMutation({
   args: {
     jobId: v.id("jobs"),
     status: v.union(
@@ -110,19 +136,39 @@ export const updateJob = mutation({
   },
 })
 
-export const deleteJob = mutation({
+export const getJobForDeletion = internalQuery({
+  args: { jobId: v.id("jobs"), clerkUserId: v.string() },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId)
+    if (!job || job.userId !== args.clerkUserId) {
+      throw new Error("Not found")
+    }
+    return job
+  },
+})
+
+export const deleteJobRecord = internalMutation({
   args: { jobId: v.id("jobs") },
   handler: async (ctx, args) => {
     await ctx.db.delete(args.jobId)
   },
 })
 
-export const cleanupJobS3 = action({
-  args: { inputUrl: v.optional(v.string()), outputUrl: v.optional(v.string()) },
+export const deleteJobAndFiles = action({
+  args: { jobId: v.id("jobs") },
   handler: async (ctx, args) => {
-    // Best-effort S3 cleanup — silently ignore failures
-    if (args.inputUrl) {
-      const inputKey = args.inputUrl.replace(
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) {
+      throw new Error("Unauthorized")
+    }
+
+    const job = await ctx.runQuery(internal.jobs.getJobForDeletion, {
+      jobId: args.jobId,
+      clerkUserId: identity.subject,
+    })
+
+    if (job.inputUrl) {
+      const inputKey = job.inputUrl.replace(
         process.env.S3_PUBLIC_URL_BASE + "/",
         ""
       )
@@ -137,8 +183,9 @@ export const cleanupJobS3 = action({
         /* ignore */
       }
     }
-    if (args.outputUrl) {
-      const outputKey = args.outputUrl.replace(
+
+    if (job.outputUrl) {
+      const outputKey = job.outputUrl.replace(
         process.env.S3_PUBLIC_URL_BASE + "/",
         ""
       )
@@ -153,38 +200,113 @@ export const cleanupJobS3 = action({
         /* ignore */
       }
     }
+
+    await ctx.runMutation(internal.jobs.deleteJobRecord, { jobId: args.jobId })
   },
 })
 
-export const clearCompleted = mutation({
-  args: {},
-  handler: async (ctx) => {
+export const getOldJobsForDeletion = internalQuery({
+  args: { clerkUserId: v.string() },
+  handler: async (ctx, args) => {
     const completed = await ctx.db
       .query("jobs")
-      .withIndex("by_status", (q) => q.eq("status", "completed"))
-      .take(50)
-    const failed = await ctx.db
-      .query("jobs")
-      .withIndex("by_status", (q) => q.eq("status", "failed"))
+      .withIndex("by_user_and_status", (q) =>
+        q.eq("userId", args.clerkUserId).eq("status", "completed")
+      )
       .take(50)
 
-    const toDelete = [...completed, ...failed].slice(0, 100)
-    for (const job of toDelete) {
-      await ctx.db.delete(job._id)
+    const failed = await ctx.db
+      .query("jobs")
+      .withIndex("by_user_and_status", (q) =>
+        q.eq("userId", args.clerkUserId).eq("status", "failed")
+      )
+      .take(50)
+
+    return [...completed, ...failed].slice(0, 100)
+  },
+})
+
+export const deleteJobRecordsBatch = internalMutation({
+  args: { jobIds: v.array(v.id("jobs")) },
+  handler: async (ctx, args) => {
+    for (const id of args.jobIds) {
+      await ctx.db.delete(id)
     }
   },
 })
 
-export const getQueue = query({
+export const clearCompletedWithFiles = action({
   args: {},
   handler: async (ctx) => {
-    return await ctx.db.query("jobs").order("desc").take(100)
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) throw new Error("Unauthorized")
+
+    const jobsToDelete = await ctx.runQuery(
+      internal.jobs.getOldJobsForDeletion,
+      {
+        clerkUserId: identity.subject,
+      }
+    )
+
+    if (jobsToDelete.length === 0) return
+
+    const keysToDelete: string[] = []
+    for (const job of jobsToDelete) {
+      if (job.inputUrl)
+        keysToDelete.push(
+          job.inputUrl.replace(process.env.S3_PUBLIC_URL_BASE + "/", "")
+        )
+      if (job.outputUrl)
+        keysToDelete.push(
+          job.outputUrl.replace(process.env.S3_PUBLIC_URL_BASE + "/", "")
+        )
+    }
+
+    await Promise.allSettled(
+      keysToDelete.map((key) =>
+        storageClient.send(
+          new DeleteObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME!,
+            Key: key,
+          })
+        )
+      )
+    )
+
+    await ctx.runMutation(internal.jobs.deleteJobRecordsBatch, {
+      jobIds: jobsToDelete.map((j) => j._id),
+    })
+  },
+})
+
+export const getQueue = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) throw new Error("Unauthorized")
+
+    return await ctx.db
+      .query("jobs")
+      .withIndex("by_user_and_status", (q) => q.eq("userId", identity.subject))
+      .order("desc")
+      .paginate(args.paginationOpts)
   },
 })
 
 export const getJobById = query({
   args: { id: v.id("jobs") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.id)
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) {
+      throw new Error("Unauthorized")
+    }
+
+    const clerkUserId = identity.subject
+
+    const job = await ctx.db.get(args.id)
+    if (!job || job.userId !== clerkUserId) {
+      throw new Error("Not found")
+    }
+    return job
   },
 })

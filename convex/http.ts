@@ -1,6 +1,6 @@
 import { httpRouter } from "convex/server"
 import { httpAction } from "./_generated/server"
-import { api } from "./_generated/api"
+import { internal } from "./_generated/api"
 
 const http = httpRouter()
 
@@ -17,7 +17,7 @@ http.route({
 
     const body = await request.json()
 
-    await ctx.runMutation(api.jobs.updateJob, {
+    await ctx.runMutation(internal.jobs.updateJob, {
       jobId: body.jobId,
       status: body.status,
       outputUrl: body.outputUrl,

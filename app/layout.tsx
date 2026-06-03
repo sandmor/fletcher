@@ -5,8 +5,7 @@ import "./globals.css"
 import { ThemeProvider, ThemeHotkey } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
 import { cn } from "@/lib/utils"
-import { ConvexClientProvider } from "@/components/convex-client-provider"
-import { ClerkProvider } from "@clerk/nextjs"
+import { ConvexClientProviderWithClerk } from "@/components/convex-client-provider"
 
 const outfit = Outfit({ subsets: ["latin"], variable: "--font-sans" })
 
@@ -28,15 +27,13 @@ export default function RootLayout({
       className={cn("font-sans", outfit.variable)}
     >
       <body>
-        <ConvexClientProvider>
-          <ClerkProvider>
-            <ThemeProvider>
-              <Toaster position="top-right" richColors closeButton />
-              <ThemeHotkey />
-              {children}
-            </ThemeProvider>
-          </ClerkProvider>
-        </ConvexClientProvider>
+        <ConvexClientProviderWithClerk>
+          <ThemeProvider>
+            <Toaster position="top-right" richColors closeButton />
+            <ThemeHotkey />
+            {children}
+          </ThemeProvider>
+        </ConvexClientProviderWithClerk>
       </body>
     </html>
   )
