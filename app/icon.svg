@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <style>
+      .f-bracket {
+        stroke: #272A30;
+        stroke-width: 2.5;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .f-eraser {
+        fill: #E05A3D;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        .f-bracket {
+          stroke: #FAF9FA;
+        }
+        .f-eraser {
+          fill: #F0B24F;
+        }
+      }
+    </style>
+  </defs>
+
+  <g transform="translate(1,1)"> <path class="f-bracket" d="M6,12 V6 H12"/>
+    <path class="f-bracket" d="M18,6 H24 V12"/>
+    <path class="f-bracket" d="M24,18 V24 H18"/>
+    <path class="f-bracket" d="M12,24 H6 V18"/>
+
+    <rect class="f-eraser" x="12" y="12" width="6" height="6" rx="1.5" transform="rotate(-15 15 15)"/>
+  </g>
+</svg>

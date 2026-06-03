@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { ImageUp, Images } from "lucide-react"
+import { AppIcon } from "@/components/app-icon"
 import { ThemeToggle } from "@/components/theme-provider"
 import { UserButton } from "@/components/user-button"
 import { cn } from "@/lib/utils"
@@ -20,8 +21,8 @@ export function PageHeader() {
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <div className="flex items-center gap-6">
           <Link href="/" className="group flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-transform group-hover:scale-105">
-              <ImageUp className="h-4 w-4" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary transition-transform group-hover:scale-105">
+              <AppIcon size={18} className="text-primary-foreground" />
             </div>
             <span className="hidden text-lg font-bold tracking-tight sm:inline">
               Fletcher
