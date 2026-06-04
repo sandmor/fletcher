@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useSignUp } from "@clerk/nextjs/legacy"
+import { useSignUp } from "@clerk/nextjs"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
@@ -18,7 +18,7 @@ import { Loader2 } from "lucide-react"
 import { SSOButton, AuthSeparator } from "@/components/auth/sso-button"
 
 export default function SignUpPage() {
-  const { isLoaded, signUp } = useSignUp()
+  const { signUp } = useSignUp()
   const router = useRouter()
   const [email, setEmail] = React.useState("")
   const [password, setPassword] = React.useState("")
@@ -28,7 +28,7 @@ export default function SignUpPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!isLoaded) return
+    if (!signUp) return
     setError("")
 
     if (password !== confirmPassword) {
@@ -39,16 +39,27 @@ export default function SignUpPage() {
     setLoading(true)
 
     try {
-      await signUp.create({
+      const { error: signUpError } = await signUp.password({
         emailAddress: email,
         password,
       })
 
-      await signUp.prepareEmailAddressVerification({
-        strategy: "email_code",
-      })
+      if (signUpError) {
+        setError(
+          signUpError.longMessage ||
+            signUpError.message ||
+            "Sign up failed. Please try again."
+        )
+        return
+      }
 
-      router.push("/verify")
+      const { error: verifyError } = await signUp.verifications.sendEmailCode()
+      if (verifyError) {
+        setError(verifyError.longMessage || "Failed to send verification code.")
+        return
+      }
+
+      router.push("/sign-up/verify")
     } catch (err: unknown) {
       const message =
         err instanceof Error
@@ -62,13 +73,20 @@ export default function SignUpPage() {
   }
 
   async function handleGoogleSSO() {
-    if (!isLoaded) return
+    if (!signUp) return
     try {
-      await signUp.authenticateWithRedirect({
+      const { error: ssoError } = await signUp.sso({
         strategy: "oauth_google",
-        redirectUrl: "/sso-callback",
-        redirectUrlComplete: "/",
+        redirectUrl: "/",
+        redirectCallbackUrl: "/sso-callback",
       })
+      if (ssoError) {
+        setError(
+          ssoError.longMessage ||
+            ssoError.message ||
+            "Failed to start Google sign-up."
+        )
+      }
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Failed to start Google sign-up."
@@ -122,7 +140,7 @@ export default function SignUpPage() {
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 
-          <Button type="submit" className="w-full" disabled={loading}>
+          <Button type="submit" className="w-full" disabled={loading || !signUp}>
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Sign up
           </Button>
