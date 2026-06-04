@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import Image from "next/image"
 import { usePaginatedQuery, useAction } from "convex/react"
 import { api } from "@/convex/_generated/api"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -98,10 +99,12 @@ export function QueueWidget() {
                     className="group/item flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30"
                   >
                     <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md border border-border/50 bg-muted">
-                      <img
+                      <Image
                         src={job.inputUrl}
                         alt={job.fileName}
-                        className="h-full w-full object-cover"
+                        fill
+                        sizes="40px"
+                        className="object-cover"
                       />
                       {job.status === "processing" && (
                         <div className="absolute inset-0 flex items-center justify-center bg-background/50 backdrop-blur-[1px]">

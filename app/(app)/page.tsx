@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback } from "react"
+import Image from "next/image"
 import { useDropzone } from "react-dropzone"
 import { useUploadQueue } from "@/hooks/use-upload-queue"
 import { cn } from "@/lib/utils"
@@ -131,10 +132,12 @@ export default function UploadPage() {
                   className="group animate-fade-in flex items-center gap-4 rounded-xl border bg-card p-3 shadow-sm transition-all hover:shadow-md"
                 >
                   <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-border/50 bg-muted">
-                    <img
+                    <Image
                       src={item.previewUrl}
                       alt={item.fileName}
-                      className="h-full w-full object-cover"
+                      fill
+                      sizes="64px"
+                      className="object-cover"
                     />
                     {item.status === "uploading" && (
                       <div className="absolute inset-0 flex items-center justify-center bg-background/50 backdrop-blur-[1px]">

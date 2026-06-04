@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Image from "next/image"
 import { useParams, useRouter } from "next/navigation"
 import { useQuery } from "convex/react"
 import { api } from "@/convex/_generated/api"
@@ -139,33 +140,45 @@ export default function DetailPage() {
 
               <div className="relative flex aspect-4/3 w-full items-center justify-center p-6 sm:aspect-video sm:p-12">
                 {activeTab === "result" && (
-                  <img
-                    src={job.outputUrl!}
-                    alt="Result"
-                    className="animate-fade-in h-full w-full object-contain drop-shadow-2xl"
-                  />
+                  <div className="animate-fade-in relative h-full w-full">
+                    <Image
+                      src={job.outputUrl!}
+                      alt="Result"
+                      fill
+                      sizes="(min-width: 640px) 80vw, 100vw"
+                      className="object-contain drop-shadow-2xl"
+                    />
+                  </div>
                 )}
 
                 {activeTab === "original" && (
-                  <img
-                    src={job.inputUrl}
-                    alt="Original"
-                    className="animate-fade-in h-full w-full object-contain shadow-2xl"
-                  />
+                  <div className="animate-fade-in relative h-full w-full">
+                    <Image
+                      src={job.inputUrl}
+                      alt="Original"
+                      fill
+                      sizes="(min-width: 640px) 80vw, 100vw"
+                      className="object-contain shadow-2xl"
+                    />
+                  </div>
                 )}
 
                 {activeTab === "compare" && (
                   <div className="animate-fade-in relative h-full w-full overflow-hidden rounded-lg bg-background/50 shadow-2xl ring-1 ring-border/50">
-                    <img
+                    <Image
                       src={job.outputUrl!}
                       alt="Result"
-                      className="pointer-events-none absolute inset-0 h-full w-full object-contain select-none"
+                      fill
+                      sizes="(min-width: 640px) 80vw, 100vw"
+                      className="pointer-events-none object-contain select-none"
                     />
 
-                    <img
+                    <Image
                       src={job.inputUrl}
                       alt="Original"
-                      className="pointer-events-none absolute inset-0 h-full w-full object-contain select-none"
+                      fill
+                      sizes="(min-width: 640px) 80vw, 100vw"
+                      className="pointer-events-none object-contain select-none"
                       style={{
                         clipPath: `polygon(0 0, ${sliderPos}% 0, ${sliderPos}% 100%, 0 100%)`,
                       }}
@@ -203,11 +216,15 @@ export default function DetailPage() {
           <CardContent className="relative p-0">
             <div className="absolute inset-0" style={checkerboardStyle} />
             <div className="relative flex aspect-4/3 w-full items-center justify-center p-6 sm:aspect-video">
-              <img
-                src={job.inputUrl}
-                alt="Original"
-                className="h-full w-full object-contain opacity-30 blur-sm"
-              />
+              <div className="relative h-full w-full">
+                <Image
+                  src={job.inputUrl}
+                  alt="Original"
+                  fill
+                  sizes="(min-width: 640px) 80vw, 100vw"
+                  className="object-contain opacity-30 blur-sm"
+                />
+              </div>
 
               <div className="absolute inset-0 flex items-center justify-center bg-background/60 backdrop-blur-md">
                 {job.status === "processing" && (

@@ -4,6 +4,7 @@ import * as React from "react"
 import { useSignUp } from "@clerk/nextjs"
 import { useRouter } from "next/navigation"
 import { OTPForm } from "@/components/auth/otp-form"
+import { getClerkErrorMessage } from "@/lib/clerk-error-message"
 
 export default function SignUpVerifyPage() {
   const { signUp } = useSignUp()
@@ -33,11 +34,8 @@ export default function SignUpVerifyPage() {
         } else {
           setError(`Verification requires further action: ${signUp.status}`)
         }
-      } catch (err: any) {
-        // Fallback for unexpected exceptions
-        setError(
-          err.errors?.[0]?.longMessage ?? err.message ?? "An error occurred."
-        )
+      } catch (err: unknown) {
+        setError(getClerkErrorMessage(err, "An error occurred."))
       } finally {
         setLoading(false)
       }

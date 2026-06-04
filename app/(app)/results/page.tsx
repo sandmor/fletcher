@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import Image from "next/image"
 import { useMemo, useState } from "react"
 import { usePaginatedQuery } from "convex/react"
 import { api } from "@/convex/_generated/api"
@@ -150,11 +151,13 @@ function JobCard({ job }: { job: Doc<"jobs"> }) {
           href={`/details/${job._id}`}
           className="relative block aspect-square w-full overflow-hidden bg-muted"
         >
-          <img
+          <Image
             src={showResult ? job.outputUrl! : job.inputUrl}
             alt={job.fileName}
+            fill
+            sizes="(min-width: 1280px) 25vw, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
             className={cn(
-              "h-full w-full object-cover transition-transform duration-700 group-hover:scale-105",
+              "object-cover transition-transform duration-700 group-hover:scale-105",
               isFailed && "grayscale"
             )}
           />
