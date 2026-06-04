@@ -55,6 +55,9 @@ export default function SignInPage() {
           router.push("/")
         } else if (result.status === "needs_second_factor") {
           // Clerk is requiring a verification code
+          await signIn.prepareSecondFactor({
+            strategy: "email_code",
+          })
           setNeedsEmailCode(true)
         } else {
           // Catch-all for other unhandled statuses, safely handling null
