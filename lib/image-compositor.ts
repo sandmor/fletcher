@@ -1,19 +1,24 @@
 import type { BackgroundConfig } from "@/lib/background"
+import { toProxiedImageUrl } from "@/lib/image-proxy"
 
-function loadImage(url: string): Promise<HTMLImageElement> {
+function loadImage(
+  url: string,
+  label: "foreground" | "background"
+): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image()
     image.crossOrigin = "anonymous"
     image.onload = () => resolve(image)
-    image.onerror = () => reject(new Error(`Failed to load image: ${url}`))
-    image.src = url
+    image.onerror = () =>
+      reject(new Error(`Failed to load ${label} image: ${url}`))
+    image.src = toProxiedImageUrl(url)
   })
 }
 
 export async function loadForegroundImage(
   foregroundUrl: string
 ): Promise<HTMLImageElement> {
-  return loadImage(foregroundUrl)
+  return loadImage(foregroundUrl, "foreground")
 }
 
 function drawImageCover(
@@ -48,7 +53,7 @@ export async function compositeImage(
     context.fillStyle = background.color
     context.fillRect(0, 0, canvas.width, canvas.height)
   } else if (background?.type === "image") {
-    const backgroundImage = await loadImage(background.imageUrl)
+    const backgroundImage = await loadImage(background.imageUrl, "background")
     drawImageCover(context, backgroundImage, canvas.width, canvas.height)
   }
 

@@ -25,6 +25,12 @@ export function CompositorCanvas({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const backgroundType = background?.type
+  const backgroundColor =
+    background?.type === "solid" ? background.color : undefined
+  const backgroundImageUrl =
+    background?.type === "image" ? background.imageUrl : undefined
+
   useEffect(() => {
     let cancelled = false
 
@@ -36,7 +42,14 @@ export function CompositorCanvas({
         const foreground = await loadForegroundImage(foregroundUrl)
         if (cancelled) return
 
-        const canvas = await compositeImage(foreground, background)
+        let backgroundConfig: BackgroundConfig | undefined
+        if (backgroundType === "solid" && backgroundColor) {
+          backgroundConfig = { type: "solid", color: backgroundColor }
+        } else if (backgroundType === "image" && backgroundImageUrl) {
+          backgroundConfig = { type: "image", imageUrl: backgroundImageUrl }
+        }
+
+        const canvas = await compositeImage(foreground, backgroundConfig)
         const displayCanvas = canvasRef.current
         if (!displayCanvas) return
 
@@ -68,7 +81,7 @@ export function CompositorCanvas({
     return () => {
       cancelled = true
     }
-  }, [foregroundUrl, background])
+  }, [foregroundUrl, backgroundType, backgroundColor, backgroundImageUrl])
 
   return (
     <div
