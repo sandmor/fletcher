@@ -1,7 +1,13 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Stage, Layer, Rect, Image as KonvaImage, Transformer } from "react-konva"
+import {
+  Stage,
+  Layer,
+  Rect,
+  Image as KonvaImage,
+  Transformer,
+} from "react-konva"
 import type Konva from "konva"
 import { useAction } from "convex/react"
 import { Loader2 } from "lucide-react"
@@ -11,9 +17,13 @@ import type { BackgroundConfig } from "@/lib/background"
 import {
   clampFrameSize,
   createDefaultLayout,
+  getDisplayScale,
   getFrameOffset,
+  getStageViewportInShapeCoords,
+  getViewportDimRects,
   getWorkspaceSize,
   layerToStageCoords,
+  MIN_FRAME_SIZE,
   stageToLayerCoords,
   type CompositionLayout,
   type LayerRect,
@@ -26,6 +36,51 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 type SelectableLayer = "foreground" | "background" | "frame"
+
+const FRAME_STROKE = "#3b82f6"
+
+type FrameBounds = LayerRect
+
+const DIM_COLOR = "rgba(0, 0, 0, 0.45)"
+
+function ViewportDimOverlay({
+  stageSize,
+  workspaceWidth,
+  workspaceHeight,
+  displayScale,
+  frameBounds,
+}: {
+  stageSize: { width: number; height: number }
+  workspaceWidth: number
+  workspaceHeight: number
+  displayScale: number
+  frameBounds: FrameBounds
+}) {
+  const viewport = getStageViewportInShapeCoords(
+    stageSize.width,
+    stageSize.height,
+    workspaceWidth,
+    workspaceHeight,
+    displayScale
+  )
+  const dimRects = getViewportDimRects(viewport, frameBounds)
+
+  return (
+    <>
+      {dimRects.map((rect, index) => (
+        <Rect
+          key={index}
+          x={rect.x}
+          y={rect.y}
+          width={rect.width}
+          height={rect.height}
+          fill={DIM_COLOR}
+          listening={false}
+        />
+      ))}
+    </>
+  )
+}
 
 interface CompositorEditorProps {
   jobId: Id<"jobs">
@@ -64,61 +119,6 @@ function useDebouncedCallback<T extends (...args: never[]) => void>(
   )
 }
 
-function DimOverlay({
-  workspaceWidth,
-  workspaceHeight,
-  frameX,
-  frameY,
-  frameWidth,
-  frameHeight,
-}: {
-  workspaceWidth: number
-  workspaceHeight: number
-  frameX: number
-  frameY: number
-  frameWidth: number
-  frameHeight: number
-}) {
-  const dimColor = "rgba(0, 0, 0, 0.45)"
-
-  return (
-    <>
-      <Rect
-        x={0}
-        y={0}
-        width={workspaceWidth}
-        height={frameY}
-        fill={dimColor}
-        listening={false}
-      />
-      <Rect
-        x={0}
-        y={frameY + frameHeight}
-        width={workspaceWidth}
-        height={workspaceHeight - frameY - frameHeight}
-        fill={dimColor}
-        listening={false}
-      />
-      <Rect
-        x={0}
-        y={frameY}
-        width={frameX}
-        height={frameHeight}
-        fill={dimColor}
-        listening={false}
-      />
-      <Rect
-        x={frameX + frameWidth}
-        y={frameY}
-        width={workspaceWidth - frameX - frameWidth}
-        height={frameHeight}
-        fill={dimColor}
-        listening={false}
-      />
-    </>
-  )
-}
-
 export function CompositorEditor({
   jobId,
   foregroundUrl,
@@ -133,6 +133,8 @@ export function CompositorEditor({
   const foregroundRef = useRef<Konva.Image>(null)
   const backgroundRef = useRef<Konva.Image | Konva.Rect>(null)
   const frameRef = useRef<Konva.Rect>(null)
+  const frameTransformRafRef = useRef<number | null>(null)
+  const liveFrameRef = useRef<FrameBounds | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -141,22 +143,25 @@ export function CompositorEditor({
   const [backgroundImage, setBackgroundImage] =
     useState<HTMLImageElement | null>(null)
   const [layout, setLayout] = useState<CompositionLayout | null>(null)
-  const [selectedLayer, setSelectedLayer] = useState<SelectableLayer>("foreground")
+  const [selectedLayer, setSelectedLayer] =
+    useState<SelectableLayer>("foreground")
+  const [liveFrame, setLiveFrame] = useState<FrameBounds | null>(null)
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 })
   const [displayScale, setDisplayScale] = useState(1)
   const initialLayoutRef = useRef(initialLayout)
 
-  const persistLayout = useDebouncedCallback((nextLayout: CompositionLayout) => {
-    void updateLayout({
-      jobId,
-      compositionLayout: nextLayout,
-    })
-  }, 500)
+  const persistLayout = useDebouncedCallback(
+    (nextLayout: CompositionLayout) => {
+      void updateLayout({
+        jobId,
+        compositionLayout: nextLayout,
+      })
+    },
+    500
+  )
 
   const backgroundIdentityKey =
-    background.type === "solid"
-      ? "solid"
-      : `image:${background.imageUrl}`
+    background.type === "solid" ? "solid" : `image:${background.imageUrl}`
 
   useEffect(() => {
     let cancelled = false
@@ -175,15 +180,13 @@ export function CompositorEditor({
           if (cancelled) return
         }
 
-        const defaultLayout = createDefaultLayout(
-          fg,
-          bgImage ?? background
-        )
+        const defaultLayout = createDefaultLayout(fg, bgImage ?? background)
         const nextLayout = initialLayoutRef.current ?? defaultLayout
 
         setForegroundImage(fg)
         setBackgroundImage(bgImage)
         setLayout(nextLayout)
+        setLiveFrame(null)
         initialLayoutRef.current = undefined
       } catch (err) {
         if (!cancelled) {
@@ -210,22 +213,40 @@ export function CompositorEditor({
     const container = containerRef.current
     if (!container || !layout) return
 
-    const observer = new ResizeObserver(([entry]) => {
-      const { width, height } = entry.contentRect
+    const updateStageMetrics = (width: number, height: number) => {
       setStageSize({ width, height })
 
       const workspace = getWorkspaceSize(layout)
-      const scale = Math.min(
-        width / workspace.width,
-        height / workspace.height,
-        1
+      setDisplayScale(
+        getDisplayScale(width, height, workspace.width, workspace.height)
       )
-      setDisplayScale(scale)
+    }
+
+    const { width, height } = container.getBoundingClientRect()
+    if (width > 0 && height > 0) {
+      updateStageMetrics(width, height)
+    }
+
+    const observer = new ResizeObserver(([entry]) => {
+      const { width: nextWidth, height: nextHeight } = entry.contentRect
+      updateStageMetrics(nextWidth, nextHeight)
     })
 
     observer.observe(container)
     return () => observer.disconnect()
   }, [layout])
+
+  useEffect(() => {
+    liveFrameRef.current = liveFrame
+  }, [liveFrame])
+
+  useEffect(() => {
+    return () => {
+      if (frameTransformRafRef.current !== null) {
+        cancelAnimationFrame(frameTransformRafRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     const transformer = transformerRef.current
@@ -263,9 +284,59 @@ export function CompositorEditor({
       foregroundImage,
       backgroundImage ?? background
     )
+    setLiveFrame(null)
     setLayout(defaultLayout)
     persistLayout(defaultLayout)
   }, [foregroundImage, backgroundImage, background, persistLayout])
+
+  const handleFrameTransform = useCallback(() => {
+    const node = frameRef.current
+    if (!node) return
+
+    const baked: FrameBounds = {
+      x: node.x(),
+      y: node.y(),
+      width: Math.max(node.width() * node.scaleX(), MIN_FRAME_SIZE),
+      height: Math.max(node.height() * node.scaleY(), MIN_FRAME_SIZE),
+    }
+
+    node.scaleX(1)
+    node.scaleY(1)
+    node.position({ x: baked.x, y: baked.y })
+    node.width(baked.width)
+    node.height(baked.height)
+
+    if (frameTransformRafRef.current !== null) return
+
+    frameTransformRafRef.current = requestAnimationFrame(() => {
+      frameTransformRafRef.current = null
+      const current = frameRef.current
+      if (!current) return
+
+      setLiveFrame({
+        x: current.x(),
+        y: current.y(),
+        width: current.width(),
+        height: current.height(),
+      })
+    })
+  }, [])
+
+  const frameTransformIsActive = useCallback(() => {
+    const node = frameRef.current
+    if (!node || !layout) return liveFrameRef.current !== null
+
+    const offset = getFrameOffset()
+    return (
+      liveFrameRef.current !== null ||
+      node.scaleX() !== 1 ||
+      node.scaleY() !== 1 ||
+      node.x() !== offset.x ||
+      node.y() !== offset.y ||
+      node.width() !== layout.width ||
+      node.height() !== layout.height
+    )
+  }, [layout])
 
   const handleTransformEnd = useCallback(
     (layer: SelectableLayer) => {
@@ -290,13 +361,14 @@ export function CompositorEditor({
         node.y(offset.y)
 
         const nextSize = clampFrameSize(
-          Math.max(node.width() * scaleX, MIN_FRAME_FROM_NODE),
-          Math.max(node.height() * scaleY, MIN_FRAME_FROM_NODE)
+          Math.max(node.width() * scaleX, MIN_FRAME_SIZE),
+          Math.max(node.height() * scaleY, MIN_FRAME_SIZE)
         )
 
         node.width(nextSize.width)
         node.height(nextSize.height)
 
+        setLiveFrame(null)
         updateLayoutState((current) => ({
           ...current,
           width: nextSize.width,
@@ -326,12 +398,26 @@ export function CompositorEditor({
     [layout, updateLayoutState]
   )
 
+  const selectLayer = useCallback(
+    (layer: SelectableLayer) => {
+      if (selectedLayer === "frame" && layer !== "frame") {
+        if (frameTransformIsActive()) {
+          handleTransformEnd("frame")
+        } else {
+          setLiveFrame(null)
+        }
+      } else {
+        setLiveFrame(null)
+      }
+      setSelectedLayer(layer)
+    },
+    [selectedLayer, handleTransformEnd, frameTransformIsActive]
+  )
+
   const handleDragEnd = useCallback(
     (layer: "foreground" | "background") => {
       const node =
-        layer === "foreground"
-          ? foregroundRef.current
-          : backgroundRef.current
+        layer === "foreground" ? foregroundRef.current : backgroundRef.current
 
       if (!node || !layout) return
 
@@ -353,19 +439,6 @@ export function CompositorEditor({
     [layout, updateLayoutState]
   )
 
-  if (loading || !layout || !foregroundImage) {
-    return (
-      <div
-        className={cn(
-          "flex h-full w-full items-center justify-center",
-          className
-        )}
-      >
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    )
-  }
-
   if (error) {
     return (
       <div
@@ -379,8 +452,27 @@ export function CompositorEditor({
     )
   }
 
+  if (loading || !layout || !foregroundImage) {
+    return (
+      <div
+        className={cn(
+          "flex h-full w-full items-center justify-center",
+          className
+        )}
+      >
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
+
   const workspace = getWorkspaceSize(layout)
   const frameOffset = getFrameOffset()
+  const frameBounds: FrameBounds = liveFrame ?? {
+    x: frameOffset.x,
+    y: frameOffset.y,
+    width: layout.width,
+    height: layout.height,
+  }
   const foregroundStage = layerToStageCoords(layout.foreground)
   const backgroundStage = layout.background
     ? layerToStageCoords(layout.background)
@@ -401,35 +493,28 @@ export function CompositorEditor({
           y={(stageSize.height - workspace.height * displayScale) / 2}
           onMouseDown={(event) => {
             if (event.target === event.target.getStage()) {
-              setSelectedLayer("foreground")
+              selectLayer("foreground")
             }
           }}
         >
           <Layer>
-            <DimOverlay
-              workspaceWidth={workspace.width}
-              workspaceHeight={workspace.height}
-              frameX={frameOffset.x}
-              frameY={frameOffset.y}
-              frameWidth={layout.width}
-              frameHeight={layout.height}
-            />
-
-            {backgroundStage && background.type === "image" && backgroundImage && (
-              <KonvaImage
-                ref={backgroundRef as React.RefObject<Konva.Image>}
-                image={backgroundImage}
-                x={backgroundStage.x}
-                y={backgroundStage.y}
-                width={backgroundStage.width}
-                height={backgroundStage.height}
-                draggable
-                onClick={() => setSelectedLayer("background")}
-                onTap={() => setSelectedLayer("background")}
-                onDragEnd={() => handleDragEnd("background")}
-                onTransformEnd={() => handleTransformEnd("background")}
-              />
-            )}
+            {backgroundStage &&
+              background.type === "image" &&
+              backgroundImage && (
+                <KonvaImage
+                  ref={backgroundRef as React.RefObject<Konva.Image>}
+                  image={backgroundImage}
+                  x={backgroundStage.x}
+                  y={backgroundStage.y}
+                  width={backgroundStage.width}
+                  height={backgroundStage.height}
+                  draggable
+                  onClick={() => selectLayer("background")}
+                  onTap={() => selectLayer("background")}
+                  onDragEnd={() => handleDragEnd("background")}
+                  onTransformEnd={() => handleTransformEnd("background")}
+                />
+              )}
 
             {backgroundStage && background.type === "solid" && (
               <Rect
@@ -440,8 +525,8 @@ export function CompositorEditor({
                 height={backgroundStage.height}
                 fill={background.color}
                 draggable
-                onClick={() => setSelectedLayer("background")}
-                onTap={() => setSelectedLayer("background")}
+                onClick={() => selectLayer("background")}
+                onTap={() => selectLayer("background")}
                 onDragEnd={() => handleDragEnd("background")}
                 onTransformEnd={() => handleTransformEnd("background")}
               />
@@ -455,31 +540,48 @@ export function CompositorEditor({
               width={foregroundStage.width}
               height={foregroundStage.height}
               draggable
-              onClick={() => setSelectedLayer("foreground")}
-              onTap={() => setSelectedLayer("foreground")}
+              onClick={() => selectLayer("foreground")}
+              onTap={() => selectLayer("foreground")}
               onDragEnd={() => handleDragEnd("foreground")}
               onTransformEnd={() => handleTransformEnd("foreground")}
             />
+          </Layer>
 
+          <Layer listening={false}>
+            <ViewportDimOverlay
+              stageSize={stageSize}
+              workspaceWidth={workspace.width}
+              workspaceHeight={workspace.height}
+              displayScale={displayScale}
+              frameBounds={frameBounds}
+            />
+          </Layer>
+
+          <Layer>
             <Rect
               ref={frameRef}
-              x={frameOffset.x}
-              y={frameOffset.y}
-              width={layout.width}
-              height={layout.height}
-              stroke="#3b82f6"
+              x={frameBounds.x}
+              y={frameBounds.y}
+              width={frameBounds.width}
+              height={frameBounds.height}
+              stroke={FRAME_STROKE}
               strokeWidth={2}
               dash={[8, 4]}
-              fill="transparent"
+              fillEnabled={false}
               draggable={false}
-              onClick={() => setSelectedLayer("frame")}
-              onTap={() => setSelectedLayer("frame")}
+              onClick={() => selectLayer("frame")}
+              onTap={() => selectLayer("frame")}
+              onTransform={handleFrameTransform}
               onTransformEnd={() => handleTransformEnd("frame")}
             />
 
             <Transformer
               ref={transformerRef}
               rotateEnabled={false}
+              borderEnabled={selectedLayer !== "frame"}
+              anchorFill="#3b82f6"
+              anchorStroke="#ffffff"
+              anchorSize={8}
               enabledAnchors={
                 selectedLayer === "frame"
                   ? [
@@ -492,17 +594,13 @@ export function CompositorEditor({
                       "top-center",
                       "bottom-center",
                     ]
-                  : [
-                      "top-left",
-                      "top-right",
-                      "bottom-left",
-                      "bottom-right",
-                    ]
+                  : ["top-left", "top-right", "bottom-left", "bottom-right"]
               }
               boundBoxFunc={(oldBox, newBox) => {
                 if (
-                  newBox.width < MIN_FRAME_FROM_NODE ||
-                  newBox.height < MIN_FRAME_FROM_NODE
+                  selectedLayer === "frame" &&
+                  (newBox.width < MIN_FRAME_SIZE ||
+                    newBox.height < MIN_FRAME_SIZE)
                 ) {
                   return oldBox
                 }
@@ -525,7 +623,7 @@ export function CompositorEditor({
             <button
               key={id}
               type="button"
-              onClick={() => setSelectedLayer(id)}
+              onClick={() => selectLayer(id)}
               className={cn(
                 "rounded-full px-3 py-1 text-xs font-medium transition-colors",
                 selectedLayer === id
@@ -539,7 +637,12 @@ export function CompositorEditor({
         </div>
 
         <div className="flex gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => void handleReset()}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void handleReset()}
+          >
             Reset to default
           </Button>
           <Button type="button" size="sm" onClick={onDone}>
@@ -555,5 +658,3 @@ export function CompositorEditor({
     </div>
   )
 }
-
-const MIN_FRAME_FROM_NODE = 32

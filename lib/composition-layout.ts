@@ -102,6 +102,84 @@ export function clampFrameSize(width: number, height: number) {
   }
 }
 
+export function getDisplayScale(
+  stageWidth: number,
+  stageHeight: number,
+  workspaceWidth: number,
+  workspaceHeight: number
+) {
+  return Math.min(
+    stageWidth / workspaceWidth,
+    stageHeight / workspaceHeight,
+    1
+  )
+}
+
+/** Visible stage area in shape coordinates (includes letterbox). */
+export function getStageViewportInShapeCoords(
+  stageWidth: number,
+  stageHeight: number,
+  workspaceWidth: number,
+  workspaceHeight: number,
+  displayScale: number
+): LayerRect {
+  if (displayScale <= 0) {
+    return { x: 0, y: 0, width: 0, height: 0 }
+  }
+
+  const stageOffsetX = (stageWidth - workspaceWidth * displayScale) / 2
+  const stageOffsetY = (stageHeight - workspaceHeight * displayScale) / 2
+
+  return {
+    x: -stageOffsetX / displayScale,
+    y: -stageOffsetY / displayScale,
+    width: stageWidth / displayScale,
+    height: stageHeight / displayScale,
+  }
+}
+
+/** Four rects covering viewport outside the frame hole (for dim overlay). */
+export function getViewportDimRects(
+  viewport: LayerRect,
+  hole: LayerRect
+): LayerRect[] {
+  const viewportRight = viewport.x + viewport.width
+  const viewportBottom = viewport.y + viewport.height
+  const holeRight = hole.x + hole.width
+  const holeBottom = hole.y + hole.height
+
+  const rects: LayerRect[] = [
+    {
+      x: viewport.x,
+      y: viewport.y,
+      width: viewport.width,
+      height: hole.y - viewport.y,
+    },
+    {
+      x: viewport.x,
+      y: holeBottom,
+      width: viewport.width,
+      height: viewportBottom - holeBottom,
+    },
+    {
+      x: viewport.x,
+      y: hole.y,
+      width: hole.x - viewport.x,
+      height: hole.height,
+    },
+    {
+      x: holeRight,
+      y: hole.y,
+      width: viewportRight - holeRight,
+      height: hole.height,
+    },
+  ]
+
+  return rects.filter(
+    (rect) => rect.width > 0 && rect.height > 0
+  )
+}
+
 export function shouldClearLayoutOnBackgroundChange(
   previous: BackgroundConfig | undefined,
   next: BackgroundConfig | null
