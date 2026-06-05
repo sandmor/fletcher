@@ -47,7 +47,11 @@ export default function DetailPage() {
 
     setDownloading(true)
     try {
-      const canvas = await compositeImageFromUrl(job.outputUrl, job.background)
+      const canvas = await compositeImageFromUrl(
+        job.outputUrl,
+        job.background,
+        job.compositionLayout
+      )
       const blob = await exportCompositedBlob(canvas)
       const baseName = job.fileName.replace(/\.[^/.]+$/, "")
       downloadBlob(blob, `${baseName}-with-background.png`)

@@ -116,6 +116,23 @@ export const deleteJobRecord = internalMutation({
   },
 })
 
+const layerRectValidator = v.object({
+  x: v.number(),
+  y: v.number(),
+  width: v.number(),
+  height: v.number(),
+})
+
+const compositionLayoutValidator = v.union(
+  v.object({
+    width: v.number(),
+    height: v.number(),
+    foreground: layerRectValidator,
+    background: v.optional(layerRectValidator),
+  }),
+  v.null()
+)
+
 export const patchJobBackground = internalMutation({
   args: {
     jobId: v.id("jobs"),
@@ -131,14 +148,44 @@ export const patchJobBackground = internalMutation({
       }),
       v.null()
     ),
+    clearCompositionLayout: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     if (args.background === null) {
-      await ctx.db.patch(args.jobId, { background: undefined })
+      await ctx.db.patch(args.jobId, {
+        background: undefined,
+        compositionLayout: undefined,
+      })
       return
     }
 
-    await ctx.db.patch(args.jobId, { background: args.background })
+    const patch: {
+      background: typeof args.background
+      compositionLayout?: undefined
+    } = { background: args.background }
+
+    if (args.clearCompositionLayout) {
+      patch.compositionLayout = undefined
+    }
+
+    await ctx.db.patch(args.jobId, patch)
+  },
+})
+
+export const patchJobCompositionLayout = internalMutation({
+  args: {
+    jobId: v.id("jobs"),
+    compositionLayout: compositionLayoutValidator,
+  },
+  handler: async (ctx, args) => {
+    if (args.compositionLayout === null) {
+      await ctx.db.patch(args.jobId, { compositionLayout: undefined })
+      return
+    }
+
+    await ctx.db.patch(args.jobId, {
+      compositionLayout: args.compositionLayout,
+    })
   },
 })
 
@@ -299,9 +346,41 @@ export const updateJobBackground = action({
       }
     }
 
+    const clearCompositionLayout =
+      args.background === null ||
+      (job.background?.type === "image" &&
+        args.background?.type === "image" &&
+        job.background.imageUrl !== args.background.imageUrl) ||
+      (job.background?.type !== args.background?.type &&
+        args.background !== null)
+
     await ctx.runMutation(internal.jobs.patchJobBackground, {
       jobId: args.jobId,
       background: args.background,
+      clearCompositionLayout,
+    })
+  },
+})
+
+export const updateJobCompositionLayout = action({
+  args: {
+    jobId: v.id("jobs"),
+    compositionLayout: compositionLayoutValidator,
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) {
+      throw new Error("Unauthorized")
+    }
+
+    await ctx.runQuery(internal.jobs.getJobForBackgroundUpdate, {
+      jobId: args.jobId,
+      clerkUserId: identity.subject,
+    })
+
+    await ctx.runMutation(internal.jobs.patchJobCompositionLayout, {
+      jobId: args.jobId,
+      compositionLayout: args.compositionLayout,
     })
   },
 })

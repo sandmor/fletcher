@@ -3,24 +3,27 @@
 import { useEffect, useRef, useState } from "react"
 import { Loader2 } from "lucide-react"
 import type { BackgroundConfig } from "@/lib/background"
+import type { CompositionLayout } from "@/lib/composition-layout"
 import {
-  compositeImage,
+  compositeImageWithLayout,
   loadForegroundImage,
 } from "@/lib/image-compositor"
 import { cn } from "@/lib/utils"
 import { TransparencyBackground } from "@/components/studio/transparency-background"
 
-interface CompositorCanvasProps {
+interface CompositorPreviewProps {
   foregroundUrl: string
   background?: BackgroundConfig
+  layout?: CompositionLayout
   className?: string
 }
 
-export function CompositorCanvas({
+export function CompositorPreview({
   foregroundUrl,
   background,
+  layout,
   className,
-}: CompositorCanvasProps) {
+}: CompositorPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -49,7 +52,11 @@ export function CompositorCanvas({
           backgroundConfig = { type: "image", imageUrl: backgroundImageUrl }
         }
 
-        const canvas = await compositeImage(foreground, backgroundConfig)
+        const canvas = await compositeImageWithLayout(
+          foreground,
+          backgroundConfig,
+          layout
+        )
         const displayCanvas = canvasRef.current
         if (!displayCanvas) return
 
@@ -81,7 +88,23 @@ export function CompositorCanvas({
     return () => {
       cancelled = true
     }
-  }, [foregroundUrl, backgroundType, backgroundColor, backgroundImageUrl])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- layout fields listed individually to avoid object reference churn
+  }, [
+    foregroundUrl,
+    backgroundType,
+    backgroundColor,
+    backgroundImageUrl,
+    layout?.width,
+    layout?.height,
+    layout?.foreground.x,
+    layout?.foreground.y,
+    layout?.foreground.width,
+    layout?.foreground.height,
+    layout?.background?.x,
+    layout?.background?.y,
+    layout?.background?.width,
+    layout?.background?.height,
+  ])
 
   return (
     <div
@@ -111,3 +134,6 @@ export function CompositorCanvas({
     </div>
   )
 }
+
+/** @deprecated Use CompositorPreview */
+export const CompositorCanvas = CompositorPreview

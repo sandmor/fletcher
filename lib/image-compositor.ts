@@ -1,4 +1,5 @@
 import type { BackgroundConfig } from "@/lib/background"
+import type { CompositionLayout } from "@/lib/composition-layout"
 import { toProxiedImageUrl } from "@/lib/image-proxy"
 
 function loadImage(
@@ -19,6 +20,12 @@ export async function loadForegroundImage(
   foregroundUrl: string
 ): Promise<HTMLImageElement> {
   return loadImage(foregroundUrl, "foreground")
+}
+
+export async function loadBackgroundImage(
+  imageUrl: string
+): Promise<HTMLImageElement> {
+  return loadImage(imageUrl, "background")
 }
 
 function drawImageCover(
@@ -61,12 +68,65 @@ export async function compositeImage(
   return canvas
 }
 
+export async function compositeImageWithLayout(
+  foreground: HTMLImageElement,
+  background: BackgroundConfig | undefined,
+  layout?: CompositionLayout
+): Promise<HTMLCanvasElement> {
+  if (!layout || !background) {
+    return compositeImage(foreground, background)
+  }
+
+  const canvas = document.createElement("canvas")
+  canvas.width = layout.width
+  canvas.height = layout.height
+
+  const context = canvas.getContext("2d")
+  if (!context) {
+    throw new Error("Canvas 2D context is unavailable")
+  }
+
+  if (background.type === "solid") {
+    context.fillStyle = background.color
+    if (layout.background) {
+      context.fillRect(
+        layout.background.x,
+        layout.background.y,
+        layout.background.width,
+        layout.background.height
+      )
+    } else {
+      context.fillRect(0, 0, layout.width, layout.height)
+    }
+  } else if (background.type === "image" && layout.background) {
+    const backgroundImage = await loadImage(background.imageUrl, "background")
+    context.drawImage(
+      backgroundImage,
+      layout.background.x,
+      layout.background.y,
+      layout.background.width,
+      layout.background.height
+    )
+  }
+
+  context.drawImage(
+    foreground,
+    layout.foreground.x,
+    layout.foreground.y,
+    layout.foreground.width,
+    layout.foreground.height
+  )
+
+  return canvas
+}
+
 export async function compositeImageFromUrl(
   foregroundUrl: string,
-  background?: BackgroundConfig
+  background?: BackgroundConfig,
+  layout?: CompositionLayout
 ): Promise<HTMLCanvasElement> {
   const foreground = await loadForegroundImage(foregroundUrl)
-  return compositeImage(foreground, background)
+  return compositeImageWithLayout(foreground, background, layout)
 }
 
 export function exportCompositedBlob(

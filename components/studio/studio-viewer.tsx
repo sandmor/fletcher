@@ -1,5 +1,6 @@
 "use client"
 
+import dynamic from "next/dynamic"
 import { useCallback, useState } from "react"
 import Image from "next/image"
 import { useAction } from "convex/react"
@@ -7,10 +8,26 @@ import { ChevronsLeftRight } from "lucide-react"
 import { api } from "@/convex/_generated/api"
 import { Doc, Id } from "@/convex/_generated/dataModel"
 import { Card, CardContent } from "@/components/ui/card"
-import { CompositorCanvas } from "@/components/studio/compositor-canvas"
+import { Button } from "@/components/ui/button"
+import { CompositorPreview } from "@/components/studio/compositor-canvas"
 import { BackgroundPicker } from "@/components/studio/background-picker"
 import { TransparencyBackground } from "@/components/studio/transparency-background"
 import { cn } from "@/lib/utils"
+
+const CompositorEditor = dynamic(
+  () =>
+    import("@/components/studio/compositor-editor").then(
+      (mod) => mod.CompositorEditor
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full w-full items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    ),
+  }
+)
 
 type StudioTab = "edit" | "compare" | "original"
 
@@ -21,6 +38,7 @@ interface StudioViewerProps {
 export function StudioViewer({ job }: StudioViewerProps) {
   const [activeTab, setActiveTab] = useState<StudioTab>("edit")
   const [sliderPos, setSliderPos] = useState(50)
+  const [advancedLayout, setAdvancedLayout] = useState(false)
   const updateBackground = useAction(api.jobs.updateJobBackground)
 
   const handleSolidChange = useCallback(
@@ -34,11 +52,14 @@ export function StudioViewer({ job }: StudioViewerProps) {
   )
 
   const handleBackgroundClear = useCallback(() => {
+    setAdvancedLayout(false)
     void updateBackground({
       jobId: job._id as Id<"jobs">,
       background: null,
     })
   }, [job._id, updateBackground])
+
+  const showAdvancedEntry = Boolean(job.background) && !advancedLayout
 
   return (
     <div className="flex flex-col gap-6">
@@ -69,14 +90,33 @@ export function StudioViewer({ job }: StudioViewerProps) {
         )}
       >
         <Card className="overflow-hidden border-border bg-card/50 shadow-sm">
-          <CardContent className="relative p-0">
+          <CardContent className="relative flex flex-col p-0">
             {activeTab !== "edit" && <TransparencyBackground />}
 
-            <div className="relative flex aspect-4/3 w-full items-center justify-center p-6 sm:aspect-video sm:p-12">
-              {activeTab === "edit" && (
-                <CompositorCanvas
+            <div
+              className={cn(
+                "relative flex w-full items-center justify-center p-6 sm:p-12",
+                activeTab === "edit" && advancedLayout
+                  ? "aspect-auto min-h-[420px]"
+                  : "aspect-4/3 sm:aspect-video"
+              )}
+            >
+              {activeTab === "edit" && advancedLayout && job.background && (
+                <CompositorEditor
+                  jobId={job._id}
                   foregroundUrl={job.outputUrl}
                   background={job.background}
+                  initialLayout={job.compositionLayout}
+                  onDone={() => setAdvancedLayout(false)}
+                  className="animate-fade-in h-full w-full"
+                />
+              )}
+
+              {activeTab === "edit" && !advancedLayout && (
+                <CompositorPreview
+                  foregroundUrl={job.outputUrl}
+                  background={job.background}
+                  layout={job.compositionLayout}
                   className="animate-fade-in h-full w-full"
                 />
               )}
@@ -137,6 +177,20 @@ export function StudioViewer({ job }: StudioViewerProps) {
                 </div>
               )}
             </div>
+
+            {activeTab === "edit" && showAdvancedEntry && (
+              <div className="border-t border-border px-6 py-3">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground"
+                  onClick={() => setAdvancedLayout(true)}
+                >
+                  Adjust positioning
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
 

@@ -136,6 +136,16 @@ Solid color changes use the same `updateJobBackground` action.
 
 - **No background set** — downloads the transparent PNG from S3
 - **Background set** — composites foreground + background in the browser and downloads a flattened PNG
+- **Custom layout** — optional "Adjust positioning" editor (Konva) saves `compositionLayout` on the job; download and preview respect the frame crop and layer positions
+
+### Advanced layout
+
+When a background is set, users can click **Adjust positioning** to open an interactive editor:
+
+- Drag and resize the foreground, background, and output frame
+- Content outside the dashed frame is dimmed and excluded from export
+- Layout is saved to Convex (`compositionLayout`) and survives refresh
+- Changing the background image or type resets the layout; solid color changes preserve it
 
 ### Background lifecycle
 
@@ -150,13 +160,15 @@ Key files:
 | File                                      | Role                                                    |
 | ----------------------------------------- | ------------------------------------------------------- |
 | `components/studio/studio-viewer.tsx`     | Edit / compare / original tabs                          |
-| `components/studio/compositor-canvas.tsx` | Canvas preview                                          |
+| `components/studio/compositor-canvas.tsx` | Static canvas preview (`CompositorPreview`)             |
+| `components/studio/compositor-editor.tsx` | Konva interactive layout editor                         |
 | `components/studio/background-picker.tsx` | Color and image background picker                       |
 | `hooks/use-background-image-upload.ts`    | Presign → upload → apply flow                           |
 | `lib/image-compositor.ts`                 | Canvas compositing and export                           |
+| `lib/composition-layout.ts`               | Layout types, defaults, and coordinate helpers          |
 | `lib/image-proxy.ts`                      | Same-origin proxy URLs for canvas image loads           |
 | `app/api/image/route.ts`                  | Proxies allowed S3 URLs for the compositor              |
-| `convex/jobs.ts`                          | `getBackgroundUploadUrl`, `updateJobBackground` actions |
+| `convex/jobs.ts`                          | Background and composition layout actions               |
 | `convex/s3.ts`                            | S3 key helpers and `getJobS3Keys` for deletion          |
 
 ## Convex

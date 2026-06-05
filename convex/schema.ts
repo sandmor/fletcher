@@ -27,5 +27,25 @@ export default defineSchema({
         })
       )
     ),
+    compositionLayout: v.optional(
+      v.object({
+        width: v.number(),
+        height: v.number(),
+        foreground: v.object({
+          x: v.number(),
+          y: v.number(),
+          width: v.number(),
+          height: v.number(),
+        }),
+        background: v.optional(
+          v.object({
+            x: v.number(),
+            y: v.number(),
+            width: v.number(),
+            height: v.number(),
+          })
+        ),
+      })
+    ),
   }).index("by_user_and_status", ["userId", "status"]),
 })
