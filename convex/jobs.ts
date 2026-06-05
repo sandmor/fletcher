@@ -98,6 +98,21 @@ export const getJobForDeletion = internalQuery({
   },
 })
 
+export const getJobsForDeletionBatch = internalQuery({
+  args: { jobIds: v.array(v.id("jobs")), clerkUserId: v.string() },
+  handler: async (ctx, args) => {
+    const jobs = []
+    for (const jobId of args.jobIds) {
+      const job = await ctx.db.get(jobId)
+      if (!job || job.userId !== args.clerkUserId) {
+        throw new Error("Not found")
+      }
+      jobs.push(job)
+    }
+    return jobs
+  },
+})
+
 export const getJobForBackgroundUpdate = internalQuery({
   args: { jobId: v.id("jobs"), clerkUserId: v.string() },
   handler: async (ctx, args) => {
@@ -207,6 +222,31 @@ export const deleteJobAndFiles = action({
     )
 
     await ctx.runMutation(internal.jobs.deleteJobRecord, { jobId: args.jobId })
+  },
+})
+
+export const deleteJobsAndFiles = action({
+  args: { jobIds: v.array(v.id("jobs")) },
+  handler: async (ctx, args) => {
+    if (args.jobIds.length === 0) return
+
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) {
+      throw new Error("Unauthorized")
+    }
+
+    const jobs = await ctx.runQuery(internal.jobs.getJobsForDeletionBatch, {
+      jobIds: args.jobIds,
+      clerkUserId: identity.subject,
+    })
+
+    const keysToDelete = jobs.flatMap((job) => getJobS3Keys(job))
+
+    await Promise.allSettled(keysToDelete.map((key) => deleteS3Object(key)))
+
+    await ctx.runMutation(internal.jobs.deleteJobRecordsBatch, {
+      jobIds: jobs.map((j) => j._id),
+    })
   },
 })
 
