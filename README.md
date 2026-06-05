@@ -151,25 +151,24 @@ When a background is set, users can click **Adjust positioning** to open an inte
 
 Background images are deleted from S3 when:
 
-- The job is deleted (`deleteJobAndFiles`)
-- Completed/failed jobs are cleared (`clearCompletedWithFiles`)
+- The job is deleted from Results (`deleteJobAndFiles`)
 - The background is removed or replaced (`updateJobBackground`)
 
 Key files:
 
-| File                                      | Role                                                    |
-| ----------------------------------------- | ------------------------------------------------------- |
-| `components/studio/studio-viewer.tsx`     | Edit / compare / original tabs                          |
-| `components/studio/compositor-canvas.tsx` | Static canvas preview (`CompositorPreview`)             |
-| `components/studio/compositor-editor.tsx` | Konva interactive layout editor                         |
-| `components/studio/background-picker.tsx` | Color and image background picker                       |
-| `hooks/use-background-image-upload.ts`    | Presign → upload → apply flow                           |
-| `lib/image-compositor.ts`                 | Canvas compositing and export                           |
-| `lib/composition-layout.ts`               | Layout types, defaults, and coordinate helpers          |
-| `lib/image-proxy.ts`                      | Same-origin proxy URLs for canvas image loads           |
-| `app/api/image/route.ts`                  | Proxies allowed S3 URLs for the compositor              |
-| `convex/jobs.ts`                          | Background and composition layout actions               |
-| `convex/s3.ts`                            | S3 key helpers and `getJobS3Keys` for deletion          |
+| File                                      | Role                                           |
+| ----------------------------------------- | ---------------------------------------------- |
+| `components/studio/studio-viewer.tsx`     | Edit / compare / original tabs                 |
+| `components/studio/compositor-canvas.tsx` | Static canvas preview (`CompositorPreview`)    |
+| `components/studio/compositor-editor.tsx` | Konva interactive layout editor                |
+| `components/studio/background-picker.tsx` | Color and image background picker              |
+| `hooks/use-background-image-upload.ts`    | Presign → upload → apply flow                  |
+| `lib/image-compositor.ts`                 | Canvas compositing and export                  |
+| `lib/composition-layout.ts`               | Layout types, defaults, and coordinate helpers |
+| `lib/image-proxy.ts`                      | Same-origin proxy URLs for canvas image loads  |
+| `app/api/image/route.ts`                  | Proxies allowed S3 URLs for the compositor     |
+| `convex/jobs.ts`                          | Background and composition layout actions      |
+| `convex/s3.ts`                            | S3 key helpers and `getJobS3Keys` for deletion |
 
 ## Convex
 
@@ -245,16 +244,25 @@ If you skip setting the S3 variables, actions like `triggerModalJob` will fail w
 4. The Modal worker processes the image, pushes the results back to a secure Convex HTTP endpoint (`/updateJobStatus`), and provides the secret header. The endpoint validates this secret and runs an `internalMutation` to update the job status.
 5. The UI updates instantly because the frontend components are reactively subscribed to live Convex queries.
 6. On the detail page, the user can pick a solid color or upload an image background. The choice is saved via `updateJobBackground` and composited in the browser for preview and download. Image backgrounds are stored under `backgrounds/{jobId}/` in S3.
-7. Deleting a job or clearing the queue triggers a single server-side action (`deleteJobAndFiles` or `clearCompletedWithFiles`). This securely verifies user ownership, deletes input, output, and background image files from S3 in a best-effort batch, and removes the database records entirely on the server.
+7. The queue widget and Results page use separate queries: `getActiveQueue` shows in-flight jobs and finished jobs not yet dismissed; `getResults` shows all jobs regardless of queue visibility.
+8. Dismissing a finished job from the queue (`dismissFromQueue` or `dismissFinishedFromQueue`) hides it from the queue only — files and the Results entry are kept. Removing a pending/processing job from the queue cancels it via `deleteJobAndFiles`.
+9. Deleting a job from the Results page (`deleteJobAndFiles` or `deleteJobsAndFiles`) permanently removes S3 files and the database record.
 
 ### Job schema
 
 Each job in Convex stores:
 
-| Field        | Description                                                                     |
-| ------------ | ------------------------------------------------------------------------------- |
-| `inputUrl`   | Original uploaded image                                                         |
-| `outputUrl`  | Transparent PNG cutout (after processing)                                       |
-| `background` | Optional `{ type: "solid", color }` or `{ type: "image", imageUrl, fileName? }` |
-| `status`     | `pending` / `processing` / `completed` / `failed`                               |
-| `fileName`   | Original file name                                                              |
+| Field            | Description                                                                     |
+| ---------------- | ------------------------------------------------------------------------------- |
+| `inputUrl`       | Original uploaded image                                                         |
+| `outputUrl`      | Transparent PNG cutout (after processing)                                       |
+| `background`     | Optional `{ type: "solid", color }` or `{ type: "image", imageUrl, fileName? }` |
+| `status`         | `pending` / `processing` / `completed` / `failed`                               |
+| `fileName`       | Original file name                                                              |
+| `queueDismissed` | When `true`, the job is hidden from the queue but still appears in Results      |
+
+After deploying the queue-dismiss feature, run the one-time backfill so existing completed/failed jobs do not reappear in the queue:
+
+```bash
+npx convex run internal/jobs:backfillQueueDismissed
+```

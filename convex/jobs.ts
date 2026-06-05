@@ -250,24 +250,25 @@ export const deleteJobsAndFiles = action({
   },
 })
 
-export const getOldJobsForDeletion = internalQuery({
-  args: { clerkUserId: v.string() },
-  handler: async (ctx, args) => {
-    const completed = await ctx.db
+export const backfillQueueDismissed = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const jobs = await ctx.db
       .query("jobs")
-      .withIndex("by_user_and_status", (q) =>
-        q.eq("userId", args.clerkUserId).eq("status", "completed")
+      .filter((q) =>
+        q.and(
+          q.or(
+            q.eq(q.field("status"), "completed"),
+            q.eq(q.field("status"), "failed")
+          ),
+          q.neq(q.field("queueDismissed"), true)
+        )
       )
-      .take(50)
+      .take(500)
 
-    const failed = await ctx.db
-      .query("jobs")
-      .withIndex("by_user_and_status", (q) =>
-        q.eq("userId", args.clerkUserId).eq("status", "failed")
-      )
-      .take(50)
-
-    return [...completed, ...failed].slice(0, 100)
+    for (const job of jobs) {
+      await ctx.db.patch(job._id, { queueDismissed: true })
+    }
   },
 })
 
@@ -280,32 +281,7 @@ export const deleteJobRecordsBatch = internalMutation({
   },
 })
 
-export const clearCompletedWithFiles = action({
-  args: {},
-  handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity()
-    if (!identity) throw new Error("Unauthorized")
-
-    const jobsToDelete = await ctx.runQuery(
-      internal.jobs.getOldJobsForDeletion,
-      {
-        clerkUserId: identity.subject,
-      }
-    )
-
-    if (jobsToDelete.length === 0) return
-
-    const keysToDelete = jobsToDelete.flatMap((job) => getJobS3Keys(job))
-
-    await Promise.allSettled(keysToDelete.map((key) => deleteS3Object(key)))
-
-    await ctx.runMutation(internal.jobs.deleteJobRecordsBatch, {
-      jobIds: jobsToDelete.map((j) => j._id),
-    })
-  },
-})
-
-export const getQueue = query({
+export const getResults = query({
   args: { paginationOpts: paginationOptsValidator },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity()
@@ -316,6 +292,80 @@ export const getQueue = query({
       .withIndex("by_user_and_status", (q) => q.eq("userId", identity.subject))
       .order("desc")
       .paginate(args.paginationOpts)
+  },
+})
+
+export const getActiveQueue = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) throw new Error("Unauthorized")
+
+    return await ctx.db
+      .query("jobs")
+      .withIndex("by_user_and_status", (q) => q.eq("userId", identity.subject))
+      .filter((q) =>
+        q.or(
+          q.eq(q.field("status"), "pending"),
+          q.eq(q.field("status"), "processing"),
+          q.and(
+            q.or(
+              q.eq(q.field("status"), "completed"),
+              q.eq(q.field("status"), "failed")
+            ),
+            q.neq(q.field("queueDismissed"), true)
+          )
+        )
+      )
+      .order("desc")
+      .paginate(args.paginationOpts)
+  },
+})
+
+export const dismissFromQueue = mutation({
+  args: { jobId: v.id("jobs") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) throw new Error("Unauthorized")
+
+    const job = await ctx.db.get(args.jobId)
+    if (!job || job.userId !== identity.subject) {
+      throw new Error("Not found")
+    }
+
+    if (job.status !== "completed" && job.status !== "failed") {
+      throw new Error("Only finished jobs can be dismissed from the queue")
+    }
+
+    await ctx.db.patch(args.jobId, { queueDismissed: true })
+  },
+})
+
+export const dismissFinishedFromQueue = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) throw new Error("Unauthorized")
+
+    const completed = await ctx.db
+      .query("jobs")
+      .withIndex("by_user_and_status", (q) =>
+        q.eq("userId", identity.subject).eq("status", "completed")
+      )
+      .filter((q) => q.neq(q.field("queueDismissed"), true))
+      .take(50)
+
+    const failed = await ctx.db
+      .query("jobs")
+      .withIndex("by_user_and_status", (q) =>
+        q.eq("userId", identity.subject).eq("status", "failed")
+      )
+      .filter((q) => q.neq(q.field("queueDismissed"), true))
+      .take(50)
+
+    for (const job of [...completed, ...failed].slice(0, 100)) {
+      await ctx.db.patch(job._id, { queueDismissed: true })
+    }
   },
 })
 

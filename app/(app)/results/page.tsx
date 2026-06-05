@@ -42,7 +42,7 @@ export default function ResultsPage() {
     results: jobs,
     status,
     loadMore,
-  } = usePaginatedQuery(api.jobs.getQueue, {}, { initialNumItems: 12 })
+  } = usePaginatedQuery(api.jobs.getResults, {}, { initialNumItems: 12 })
 
   const deleteJobAndFiles = useAction(api.jobs.deleteJobAndFiles)
   const deleteJobsAndFiles = useAction(api.jobs.deleteJobsAndFiles)

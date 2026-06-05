@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Image from "next/image"
-import { usePaginatedQuery, useAction } from "convex/react"
+import { usePaginatedQuery, useAction, useMutation } from "convex/react"
 import { api } from "@/convex/_generated/api"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
@@ -19,10 +19,11 @@ export function QueueWidget() {
     results: jobs,
     status,
     loadMore,
-  } = usePaginatedQuery(api.jobs.getQueue, {}, { initialNumItems: 20 })
+  } = usePaginatedQuery(api.jobs.getActiveQueue, {}, { initialNumItems: 20 })
 
   const deleteJobAndFiles = useAction(api.jobs.deleteJobAndFiles)
-  const clearCompletedWithFiles = useAction(api.jobs.clearCompletedWithFiles)
+  const dismissFromQueue = useMutation(api.jobs.dismissFromQueue)
+  const dismissFinishedFromQueue = useMutation(api.jobs.dismissFinishedFromQueue)
 
   const [open, setOpen] = React.useState(true)
   const [isClearing, setIsClearing] = React.useState(false)
@@ -33,27 +34,31 @@ export function QueueWidget() {
   const failed = jobs.filter((j) => j.status === "failed")
   const activeCount = pending.length + processing.length
 
-  const handleDelete = React.useCallback(
+  const handleRemove = React.useCallback(
     async (job: (typeof jobs)[number]) => {
       try {
-        await deleteJobAndFiles({ jobId: job._id })
+        if (job.status === "completed" || job.status === "failed") {
+          await dismissFromQueue({ jobId: job._id })
+        } else {
+          await deleteJobAndFiles({ jobId: job._id })
+        }
       } catch (err) {
-        console.error("Failed to delete job:", err)
+        console.error("Failed to remove job:", err)
       }
     },
-    [deleteJobAndFiles]
+    [deleteJobAndFiles, dismissFromQueue]
   )
 
   const handleClearFinished = React.useCallback(async () => {
     setIsClearing(true)
     try {
-      await clearCompletedWithFiles()
+      await dismissFinishedFromQueue()
     } catch (err) {
-      console.error("Failed to clear jobs:", err)
+      console.error("Failed to dismiss jobs:", err)
     } finally {
       setIsClearing(false)
     }
-  }, [clearCompletedWithFiles])
+  }, [dismissFinishedFromQueue])
 
   if (jobs.length === 0 && status === "LoadingFirstPage") return null
 
@@ -124,8 +129,12 @@ export function QueueWidget() {
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/item:opacity-100 hover:bg-destructive/10 hover:text-destructive"
-                      onClick={() => handleDelete(job)}
-                      aria-label="Remove job"
+                      onClick={() => handleRemove(job)}
+                      aria-label={
+                        job.status === "completed" || job.status === "failed"
+                          ? "Dismiss from queue"
+                          : "Cancel job"
+                      }
                     >
                       <X className="h-3.5 w-3.5" />
                     </Button>
