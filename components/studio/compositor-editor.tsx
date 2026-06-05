@@ -16,17 +16,24 @@ import { Id } from "@/convex/_generated/dataModel"
 import type { BackgroundConfig } from "@/lib/background"
 import {
   clampFrameSize,
+  clampUserZoom,
   createDefaultLayout,
   getDisplayScale,
+  getEffectiveStageTransform,
+  getFitCenterOffset,
   getFrameOffset,
   getStageViewportInShapeCoords,
   getViewportDimRects,
   getWorkspaceSize,
   layerToStageCoords,
+  MAX_USER_ZOOM,
   MIN_FRAME_SIZE,
+  MIN_USER_ZOOM,
   stageToLayerCoords,
+  zoomAtPointer,
   type CompositionLayout,
   type LayerRect,
+  type Point,
 } from "@/lib/composition-layout"
 import {
   loadBackgroundImage,
@@ -45,23 +52,23 @@ const DIM_COLOR = "rgba(0, 0, 0, 0.45)"
 
 function ViewportDimOverlay({
   stageSize,
-  workspaceWidth,
-  workspaceHeight,
-  displayScale,
+  stageX,
+  stageY,
+  scale,
   frameBounds,
 }: {
   stageSize: { width: number; height: number }
-  workspaceWidth: number
-  workspaceHeight: number
-  displayScale: number
+  stageX: number
+  stageY: number
+  scale: number
   frameBounds: FrameBounds
 }) {
   const viewport = getStageViewportInShapeCoords(
     stageSize.width,
     stageSize.height,
-    workspaceWidth,
-    workspaceHeight,
-    displayScale
+    stageX,
+    stageY,
+    scale
   )
   const dimRects = getViewportDimRects(viewport, frameBounds)
 
@@ -135,6 +142,9 @@ export function CompositorEditor({
   const frameRef = useRef<Konva.Rect>(null)
   const frameTransformRafRef = useRef<number | null>(null)
   const liveFrameRef = useRef<FrameBounds | null>(null)
+  const isSpacePressedRef = useRef(false)
+  const isPanningRef = useRef(false)
+  const lastPanPointerRef = useRef<Point | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -147,7 +157,11 @@ export function CompositorEditor({
     useState<SelectableLayer>("foreground")
   const [liveFrame, setLiveFrame] = useState<FrameBounds | null>(null)
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 })
-  const [displayScale, setDisplayScale] = useState(1)
+  const [fitScale, setFitScale] = useState(1)
+  const [userZoom, setUserZoom] = useState(1)
+  const [panOffset, setPanOffset] = useState<Point>({ x: 0, y: 0 })
+  const [isSpacePressed, setIsSpacePressed] = useState(false)
+  const [isPanning, setIsPanning] = useState(false)
   const initialLayoutRef = useRef(initialLayout)
 
   const persistLayout = useDebouncedCallback(
@@ -217,7 +231,7 @@ export function CompositorEditor({
       setStageSize({ width, height })
 
       const workspace = getWorkspaceSize(layout)
-      setDisplayScale(
+      setFitScale(
         getDisplayScale(width, height, workspace.width, workspace.height)
       )
     }
@@ -265,6 +279,147 @@ export function CompositorEditor({
     }
   }, [selectedLayer, layout, foregroundImage, backgroundImage])
 
+  useEffect(() => {
+    isSpacePressedRef.current = isSpacePressed
+  }, [isSpacePressed])
+
+  useEffect(() => {
+    isPanningRef.current = isPanning
+  }, [isPanning])
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container || !layout) return
+
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault()
+
+      const rect = container.getBoundingClientRect()
+      const pointer = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      }
+      const workspace = getWorkspaceSize(layout)
+      const center = getFitCenterOffset(
+        stageSize.width,
+        stageSize.height,
+        workspace.width,
+        workspace.height,
+        fitScale
+      )
+      const scaleFactor = Math.exp(-event.deltaY * 0.002)
+      const oldScale = fitScale * userZoom
+      const oldPosition = {
+        x: center.x + panOffset.x,
+        y: center.y + panOffset.y,
+      }
+      const { scale, position } = zoomAtPointer(
+        oldScale,
+        oldPosition,
+        pointer,
+        scaleFactor,
+        fitScale * MIN_USER_ZOOM,
+        fitScale * MAX_USER_ZOOM
+      )
+
+      setUserZoom(clampUserZoom(scale / fitScale))
+      setPanOffset({
+        x: position.x - center.x,
+        y: position.y - center.y,
+      })
+    }
+
+    container.addEventListener("wheel", handleWheel, { passive: false })
+    return () => container.removeEventListener("wheel", handleWheel)
+  }, [layout, fitScale, userZoom, panOffset, stageSize])
+
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false
+      return (
+        target.isContentEditable ||
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT"
+      )
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== "Space" || event.repeat) return
+      if (isEditableTarget(event.target)) return
+      event.preventDefault()
+      setIsSpacePressed(true)
+    }
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.code !== "Space") return
+      setIsSpacePressed(false)
+      if (isPanningRef.current) {
+        isPanningRef.current = false
+        setIsPanning(false)
+        lastPanPointerRef.current = null
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    window.addEventListener("keyup", handleKeyUp)
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+      window.removeEventListener("keyup", handleKeyUp)
+    }
+  }, [])
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const endPan = () => {
+      if (!isPanningRef.current) return
+      isPanningRef.current = false
+      setIsPanning(false)
+      lastPanPointerRef.current = null
+    }
+
+    const handleMouseDown = (event: MouseEvent) => {
+      const spacePan = isSpacePressedRef.current && event.button === 0
+      const middlePan = event.button === 1
+      if (!spacePan && !middlePan) return
+
+      event.preventDefault()
+      isPanningRef.current = true
+      setIsPanning(true)
+      lastPanPointerRef.current = { x: event.clientX, y: event.clientY }
+    }
+
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!isPanningRef.current || !lastPanPointerRef.current) return
+
+      event.preventDefault()
+      const deltaX = event.clientX - lastPanPointerRef.current.x
+      const deltaY = event.clientY - lastPanPointerRef.current.y
+      lastPanPointerRef.current = { x: event.clientX, y: event.clientY }
+
+      setPanOffset((current) => ({
+        x: current.x + deltaX,
+        y: current.y + deltaY,
+      }))
+    }
+
+    container.addEventListener("mousedown", handleMouseDown)
+    window.addEventListener("mousemove", handleMouseMove)
+    window.addEventListener("mouseup", endPan)
+    return () => {
+      container.removeEventListener("mousedown", handleMouseDown)
+      window.removeEventListener("mousemove", handleMouseMove)
+      window.removeEventListener("mouseup", endPan)
+    }
+  }, [])
+
+  const resetView = useCallback(() => {
+    setUserZoom(1)
+    setPanOffset({ x: 0, y: 0 })
+  }, [])
+
   const updateLayoutState = useCallback(
     (updater: (current: CompositionLayout) => CompositionLayout) => {
       setLayout((current) => {
@@ -286,8 +441,9 @@ export function CompositorEditor({
     )
     setLiveFrame(null)
     setLayout(defaultLayout)
+    resetView()
     persistLayout(defaultLayout)
-  }, [foregroundImage, backgroundImage, background, persistLayout])
+  }, [foregroundImage, backgroundImage, background, persistLayout, resetView])
 
   const handleFrameTransform = useCallback(() => {
     const node = frameRef.current
@@ -477,21 +633,37 @@ export function CompositorEditor({
   const backgroundStage = layout.background
     ? layerToStageCoords(layout.background)
     : null
+  const stageTransform = getEffectiveStageTransform(
+    stageSize.width,
+    stageSize.height,
+    workspace.width,
+    workspace.height,
+    fitScale,
+    userZoom,
+    panOffset
+  )
+  const layersDraggable = !isSpacePressed && !isPanning
 
   return (
     <div className={cn("flex h-full w-full flex-col gap-3", className)}>
       <div
         ref={containerRef}
-        className="relative min-h-0 flex-1 overflow-hidden rounded-lg bg-muted/20"
+        className={cn(
+          "relative min-h-0 flex-1 overflow-hidden rounded-lg bg-muted/20",
+          isSpacePressed && !isPanning && "cursor-grab",
+          isPanning && "cursor-grabbing",
+          isSpacePressed && "select-none"
+        )}
       >
         <Stage
           width={stageSize.width}
           height={stageSize.height}
-          scaleX={displayScale}
-          scaleY={displayScale}
-          x={(stageSize.width - workspace.width * displayScale) / 2}
-          y={(stageSize.height - workspace.height * displayScale) / 2}
+          scaleX={stageTransform.scale}
+          scaleY={stageTransform.scale}
+          x={stageTransform.x}
+          y={stageTransform.y}
           onMouseDown={(event) => {
+            if (isSpacePressedRef.current || event.evt.button === 1) return
             if (event.target === event.target.getStage()) {
               selectLayer("foreground")
             }
@@ -508,7 +680,7 @@ export function CompositorEditor({
                   y={backgroundStage.y}
                   width={backgroundStage.width}
                   height={backgroundStage.height}
-                  draggable
+                  draggable={layersDraggable}
                   onClick={() => selectLayer("background")}
                   onTap={() => selectLayer("background")}
                   onDragEnd={() => handleDragEnd("background")}
@@ -524,7 +696,7 @@ export function CompositorEditor({
                 width={backgroundStage.width}
                 height={backgroundStage.height}
                 fill={background.color}
-                draggable
+                draggable={layersDraggable}
                 onClick={() => selectLayer("background")}
                 onTap={() => selectLayer("background")}
                 onDragEnd={() => handleDragEnd("background")}
@@ -539,7 +711,7 @@ export function CompositorEditor({
               y={foregroundStage.y}
               width={foregroundStage.width}
               height={foregroundStage.height}
-              draggable
+              draggable={layersDraggable}
               onClick={() => selectLayer("foreground")}
               onTap={() => selectLayer("foreground")}
               onDragEnd={() => handleDragEnd("foreground")}
@@ -550,9 +722,9 @@ export function CompositorEditor({
           <Layer listening={false}>
             <ViewportDimOverlay
               stageSize={stageSize}
-              workspaceWidth={workspace.width}
-              workspaceHeight={workspace.height}
-              displayScale={displayScale}
+              stageX={stageTransform.x}
+              stageY={stageTransform.y}
+              scale={stageTransform.scale}
               frameBounds={frameBounds}
             />
           </Layer>
@@ -641,6 +813,14 @@ export function CompositorEditor({
             type="button"
             variant="outline"
             size="sm"
+            onClick={resetView}
+          >
+            Reset view
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
             onClick={() => void handleReset()}
           >
             Reset to default
@@ -652,8 +832,9 @@ export function CompositorEditor({
       </div>
 
       <p className="px-1 text-xs text-muted-foreground">
-        Drag layers to reposition. Content outside the frame will not appear in
-        the final image.
+        Drag layers to reposition. Scroll to zoom; hold Space or use the
+        middle mouse button to pan. Content outside the frame will not appear
+        in the final image.
       </p>
     </div>
   )

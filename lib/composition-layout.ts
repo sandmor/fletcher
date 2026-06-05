@@ -115,26 +115,100 @@ export function getDisplayScale(
   )
 }
 
-/** Visible stage area in shape coordinates (includes letterbox). */
-export function getStageViewportInShapeCoords(
+export type Point = {
+  x: number
+  y: number
+}
+
+export const MIN_USER_ZOOM = 0.25
+export const MAX_USER_ZOOM = 8
+
+export function clampUserZoom(zoom: number) {
+  return Math.min(MAX_USER_ZOOM, Math.max(MIN_USER_ZOOM, zoom))
+}
+
+export function getFitCenterOffset(
   stageWidth: number,
   stageHeight: number,
   workspaceWidth: number,
   workspaceHeight: number,
-  displayScale: number
+  fitScale: number
+): Point {
+  return {
+    x: (stageWidth - workspaceWidth * fitScale) / 2,
+    y: (stageHeight - workspaceHeight * fitScale) / 2,
+  }
+}
+
+export function getEffectiveStageTransform(
+  stageWidth: number,
+  stageHeight: number,
+  workspaceWidth: number,
+  workspaceHeight: number,
+  fitScale: number,
+  userZoom: number,
+  panOffset: Point
+) {
+  const center = getFitCenterOffset(
+    stageWidth,
+    stageHeight,
+    workspaceWidth,
+    workspaceHeight,
+    fitScale
+  )
+  const scale = fitScale * userZoom
+
+  return {
+    scale,
+    x: center.x + panOffset.x,
+    y: center.y + panOffset.y,
+  }
+}
+
+/** Visible stage area in shape coordinates (includes letterbox). */
+export function getStageViewportInShapeCoords(
+  stageWidth: number,
+  stageHeight: number,
+  stageX: number,
+  stageY: number,
+  scale: number
 ): LayerRect {
-  if (displayScale <= 0) {
+  if (scale <= 0) {
     return { x: 0, y: 0, width: 0, height: 0 }
   }
 
-  const stageOffsetX = (stageWidth - workspaceWidth * displayScale) / 2
-  const stageOffsetY = (stageHeight - workspaceHeight * displayScale) / 2
+  return {
+    x: -stageX / scale,
+    y: -stageY / scale,
+    width: stageWidth / scale,
+    height: stageHeight / scale,
+  }
+}
+
+export function zoomAtPointer(
+  oldScale: number,
+  oldPosition: Point,
+  pointer: Point,
+  scaleFactor: number,
+  minScale: number,
+  maxScale: number
+) {
+  const newScale = Math.min(
+    maxScale,
+    Math.max(minScale, oldScale * scaleFactor)
+  )
+
+  const mousePointTo = {
+    x: (pointer.x - oldPosition.x) / oldScale,
+    y: (pointer.y - oldPosition.y) / oldScale,
+  }
 
   return {
-    x: -stageOffsetX / displayScale,
-    y: -stageOffsetY / displayScale,
-    width: stageWidth / displayScale,
-    height: stageHeight / displayScale,
+    scale: newScale,
+    position: {
+      x: pointer.x - mousePointTo.x * newScale,
+      y: pointer.y - mousePointTo.y * newScale,
+    },
   }
 }
 
