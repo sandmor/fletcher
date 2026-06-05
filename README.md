@@ -235,34 +235,3 @@ Required variables:
 | `MODAL_CALLBACK_SECRET`   | Shared secret for Modal webhook callbacks          |
 
 If you skip setting the S3 variables, actions like `triggerModalJob` will fail with a `Region is missing` error because the S3 SDK inside Convex has no credentials to work with. If you skip `CLERK_JWT_ISSUER_DOMAIN`, all user authentication checks within Convex will fail.
-
-### How the flow works
-
-1. The frontend requests a presigned S3 upload URL from the Next.js API route (`POST /api/upload/presigned`) and uploads the image directly to object storage.
-2. The user clicks **Submit** — this calls the `createJob` Convex mutation to save the job record, followed by the `triggerModalJob` action.
-3. `triggerModalJob` generates a secure presigned upload URL for the final output and passes it alongside a unique `MODAL_CALLBACK_SECRET` to the external Modal worker.
-4. The Modal worker processes the image, pushes the results back to a secure Convex HTTP endpoint (`/updateJobStatus`), and provides the secret header. The endpoint validates this secret and runs an `internalMutation` to update the job status.
-5. The UI updates instantly because the frontend components are reactively subscribed to live Convex queries.
-6. On the detail page, the user can pick a solid color or upload an image background. The choice is saved via `updateJobBackground` and composited in the browser for preview and download. Image backgrounds are stored under `backgrounds/{jobId}/` in S3.
-7. The queue widget and Results page use separate queries: `getActiveQueue` shows in-flight jobs and finished jobs not yet dismissed; `getResults` shows all jobs regardless of queue visibility.
-8. Dismissing a finished job from the queue (`dismissFromQueue` or `dismissFinishedFromQueue`) hides it from the queue only — files and the Results entry are kept. Removing a pending/processing job from the queue cancels it via `deleteJobAndFiles`.
-9. Deleting a job from the Results page (`deleteJobAndFiles` or `deleteJobsAndFiles`) permanently removes S3 files and the database record.
-
-### Job schema
-
-Each job in Convex stores:
-
-| Field            | Description                                                                     |
-| ---------------- | ------------------------------------------------------------------------------- |
-| `inputUrl`       | Original uploaded image                                                         |
-| `outputUrl`      | Transparent PNG cutout (after processing)                                       |
-| `background`     | Optional `{ type: "solid", color }` or `{ type: "image", imageUrl, fileName? }` |
-| `status`         | `pending` / `processing` / `completed` / `failed`                               |
-| `fileName`       | Original file name                                                              |
-| `queueDismissed` | When `true`, the job is hidden from the queue but still appears in Results      |
-
-After deploying the queue-dismiss feature, run the one-time backfill so existing completed/failed jobs do not reappear in the queue:
-
-```bash
-npx convex run internal/jobs:backfillQueueDismissed
-```

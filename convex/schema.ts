@@ -47,6 +47,6 @@ export default defineSchema({
         ),
       })
     ),
-    queueDismissed: v.optional(v.boolean()),
+    queueDismissed: v.boolean(),
   }).index("by_user_and_status", ["userId", "status"]),
 })

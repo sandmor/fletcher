@@ -32,6 +32,7 @@ export const createJob = mutation({
       status: "pending",
       inputUrl: args.inputUrl,
       fileName: args.fileName,
+      queueDismissed: false,
     })
   },
 })
@@ -45,7 +46,11 @@ export const triggerModalJob = action({
     }
 
     const outputKey = `outputs/${args.jobId}.png`
-    const modalUploadUrl = await createPresignedPutUrl(outputKey, "image/png", 900)
+    const modalUploadUrl = await createPresignedPutUrl(
+      outputKey,
+      "image/png",
+      900
+    )
     const finalDownloadUrl = getPublicUrl(outputKey)
     const callbackUrl = `${process.env.CONVEX_SITE_URL}/updateJobStatus`
 
@@ -247,28 +252,6 @@ export const deleteJobsAndFiles = action({
     await ctx.runMutation(internal.jobs.deleteJobRecordsBatch, {
       jobIds: jobs.map((j) => j._id),
     })
-  },
-})
-
-export const backfillQueueDismissed = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const jobs = await ctx.db
-      .query("jobs")
-      .filter((q) =>
-        q.and(
-          q.or(
-            q.eq(q.field("status"), "completed"),
-            q.eq(q.field("status"), "failed")
-          ),
-          q.neq(q.field("queueDismissed"), true)
-        )
-      )
-      .take(500)
-
-    for (const job of jobs) {
-      await ctx.db.patch(job._id, { queueDismissed: true })
-    }
   },
 })
 
