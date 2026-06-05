@@ -9,29 +9,52 @@ import { Id } from "@/convex/_generated/dataModel"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { StudioViewer } from "@/components/studio/studio-viewer"
+import { TransparencyBackground } from "@/components/studio/transparency-background"
 import {
   ArrowLeft,
   Download,
   Loader2,
   Clock,
   Image as ImageIcon,
-  ChevronsLeftRight,
   AlertCircle,
 } from "lucide-react"
-import { cn } from "@/lib/utils"
+import {
+  compositeImageFromUrl,
+  downloadBlob,
+  exportCompositedBlob,
+} from "@/lib/image-compositor"
 
 export default function DetailPage() {
   const params = useParams()
   const router = useRouter()
-  // Slider position state (0 to 100)
-  const [sliderPos, setSliderPos] = useState(50)
-  const [activeTab, setActiveTab] = useState<"result" | "compare" | "original">(
-    "result"
-  )
+  const [downloading, setDownloading] = useState(false)
 
   const rawId = Array.isArray(params.id) ? params.id[0] : params.id
   const id = rawId ? (rawId as Id<"jobs">) : null
   const job = useQuery(api.jobs.getJobById, id ? { id } : "skip")
+
+  const handleDownload = async () => {
+    if (!job?.outputUrl) return
+
+    if (!job.background) {
+      const anchor = document.createElement("a")
+      anchor.href = job.outputUrl
+      anchor.download = job.fileName
+      anchor.click()
+      return
+    }
+
+    setDownloading(true)
+    try {
+      const canvas = await compositeImageFromUrl(job.outputUrl, job.background)
+      const blob = await exportCompositedBlob(canvas)
+      const baseName = job.fileName.replace(/\.[^/.]+$/, "")
+      downloadBlob(blob, `${baseName}-with-background.png`)
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   if (!id || job === null) {
     return (
@@ -67,16 +90,6 @@ export default function DetailPage() {
 
   const showResult = job.status === "completed" && job.outputUrl
 
-  const checkerboardStyle = {
-    backgroundImage: `
-      repeating-linear-gradient(45deg, var(--color-muted) 25%, transparent 25%, transparent 75%, var(--color-muted) 75%, var(--color-muted)), 
-      repeating-linear-gradient(45deg, var(--color-muted) 25%, var(--color-background) 25%, var(--color-background) 75%, var(--color-muted) 75%, var(--color-muted))
-    `,
-    backgroundPosition: "0 0, 12px 12px",
-    backgroundSize: "24px 24px",
-    opacity: 0.5,
-  }
-
   return (
     <main className="animate-fade-in mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -103,118 +116,28 @@ export default function DetailPage() {
         </div>
 
         {showResult && (
-          <Button asChild size="lg" className="shadow-sm">
-            <a href={job.outputUrl!} download={job.fileName}>
+          <Button
+            size="lg"
+            className="shadow-sm"
+            onClick={() => void handleDownload()}
+            disabled={downloading}
+          >
+            {downloading ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
               <Download className="mr-2 h-4 w-4" />
-              Download Result
-            </a>
+            )}
+            Download Result
           </Button>
         )}
       </div>
 
-      {showResult ? (
-        <div className="flex flex-col gap-6">
-          <div className="flex justify-center">
-            <div className="flex rounded-full border bg-muted/50 p-1">
-              {(["result", "compare", "original"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={cn(
-                    "relative rounded-full px-6 py-1.5 text-sm font-medium transition-colors",
-                    activeTab === tab
-                      ? "bg-background text-foreground shadow-sm ring-1 ring-border"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  <span className="capitalize">{tab}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <Card className="overflow-hidden border-border bg-card/50 shadow-sm">
-            <CardContent className="relative p-0">
-              {/* Checkerboard background */}
-              <div className="absolute inset-0" style={checkerboardStyle} />
-
-              <div className="relative flex aspect-4/3 w-full items-center justify-center p-6 sm:aspect-video sm:p-12">
-                {activeTab === "result" && (
-                  <div className="animate-fade-in relative h-full w-full">
-                    <Image
-                      src={job.outputUrl!}
-                      alt="Result"
-                      fill
-                      sizes="(min-width: 640px) 80vw, 100vw"
-                      className="object-contain drop-shadow-2xl"
-                    />
-                  </div>
-                )}
-
-                {activeTab === "original" && (
-                  <div className="animate-fade-in relative h-full w-full">
-                    <Image
-                      src={job.inputUrl}
-                      alt="Original"
-                      fill
-                      sizes="(min-width: 640px) 80vw, 100vw"
-                      className="object-contain shadow-2xl"
-                    />
-                  </div>
-                )}
-
-                {activeTab === "compare" && (
-                  <div className="animate-fade-in relative h-full w-full overflow-hidden rounded-lg bg-background/50 shadow-2xl ring-1 ring-border/50">
-                    <Image
-                      src={job.outputUrl!}
-                      alt="Result"
-                      fill
-                      sizes="(min-width: 640px) 80vw, 100vw"
-                      className="pointer-events-none object-contain select-none"
-                    />
-
-                    <Image
-                      src={job.inputUrl}
-                      alt="Original"
-                      fill
-                      sizes="(min-width: 640px) 80vw, 100vw"
-                      className="pointer-events-none object-contain select-none"
-                      style={{
-                        clipPath: `polygon(0 0, ${sliderPos}% 0, ${sliderPos}% 100%, 0 100%)`,
-                      }}
-                    />
-
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      value={sliderPos}
-                      onChange={(e) => setSliderPos(Number(e.target.value))}
-                      className="absolute inset-0 z-20 h-full w-full cursor-ew-resize opacity-0"
-                    />
-
-                    <div
-                      className="pointer-events-none absolute top-0 bottom-0 z-10 w-0.5 bg-primary shadow-[0_0_10px_rgba(0,0,0,0.5)]"
-                      style={{
-                        left: `${sliderPos}%`,
-                        transform: "translateX(-50%)",
-                      }}
-                    >
-                      <div className="absolute top-1/2 left-1/2 flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg ring-4 ring-background">
-                        <ChevronsLeftRight className="h-4 w-4" />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+      {showResult && job.outputUrl ? (
+        <StudioViewer job={{ ...job, outputUrl: job.outputUrl }} />
       ) : (
-        /* Fallback for processing/pending/failed states */
         <Card className="overflow-hidden border-border shadow-sm">
           <CardContent className="relative p-0">
-            <div className="absolute inset-0" style={checkerboardStyle} />
+            <TransparencyBackground />
             <div className="relative flex aspect-4/3 w-full items-center justify-center p-6 sm:aspect-video">
               <div className="relative h-full w-full">
                 <Image

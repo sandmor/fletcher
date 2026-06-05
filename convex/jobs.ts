@@ -31,31 +31,6 @@ function getPublicUrl(fileKey: string): string {
   return `${base}/${fileKey}`
 }
 
-export const getFrontendUploadUrl = action({
-  args: { filename: v.string(), contentType: v.string() },
-  handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity()
-    if (!identity) {
-      throw new Error("Unauthorized")
-    }
-
-    const fileKey = `inputs/${Date.now()}-${args.filename}`
-    const command = new PutObjectCommand({
-      Bucket: process.env.S3_BUCKET_NAME!,
-      Key: fileKey,
-      ContentType: args.contentType,
-    })
-
-    const uploadUrl = await getSignedUrl(storageClient, command, {
-      expiresIn: 600,
-    })
-
-    const downloadUrl = getPublicUrl(fileKey)
-
-    return { uploadUrl, downloadUrl }
-  },
-})
-
 export const createJob = mutation({
   args: { inputUrl: v.string(), fileName: v.string() },
   handler: async (ctx, args) => {
@@ -290,6 +265,39 @@ export const getQueue = query({
       .withIndex("by_user_and_status", (q) => q.eq("userId", identity.subject))
       .order("desc")
       .paginate(args.paginationOpts)
+  },
+})
+
+const backgroundValidator = v.union(
+  v.object({
+    type: v.literal("solid"),
+    color: v.string(),
+  }),
+  v.null()
+)
+
+export const updateJobBackground = mutation({
+  args: {
+    jobId: v.id("jobs"),
+    background: backgroundValidator,
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) {
+      throw new Error("Unauthorized")
+    }
+
+    const job = await ctx.db.get(args.jobId)
+    if (!job || job.userId !== identity.subject) {
+      throw new Error("Not found")
+    }
+
+    if (args.background === null) {
+      await ctx.db.patch(args.jobId, { background: undefined })
+      return
+    }
+
+    await ctx.db.patch(args.jobId, { background: args.background })
   },
 })
 

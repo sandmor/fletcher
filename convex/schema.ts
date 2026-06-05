@@ -14,5 +14,11 @@ export default defineSchema({
     outputUrl: v.optional(v.string()),
     error: v.optional(v.string()),
     fileName: v.string(),
+    background: v.optional(
+      v.object({
+        type: v.literal("solid"),
+        color: v.string(),
+      })
+    ),
   }).index("by_user_and_status", ["userId", "status"]),
 })
