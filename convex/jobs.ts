@@ -6,30 +6,16 @@ import {
   internalQuery,
 } from "./_generated/server"
 import { v } from "convex/values"
-import {
-  S3Client,
-  PutObjectCommand,
-  DeleteObjectCommand,
-} from "@aws-sdk/client-s3"
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { internal } from "./_generated/api"
 import { paginationOptsValidator } from "convex/server"
-
-const storageClient = new S3Client({
-  region: process.env.S3_REGION || "auto",
-  endpoint: process.env.S3_ENDPOINT || undefined,
-  credentials: {
-    accessKeyId: process.env.S3_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
-  },
-  forcePathStyle:
-    process.env.S3_FORCE_PATH_STYLE === "true" || !!process.env.S3_ENDPOINT,
-})
-
-function getPublicUrl(fileKey: string): string {
-  const base = (process.env.S3_PUBLIC_URL_BASE || "").replace(/\/$/, "")
-  return `${base}/${fileKey}`
-}
+import {
+  buildBackgroundKey,
+  createPresignedPutUrl,
+  deleteS3Object,
+  deleteS3ObjectByUrl,
+  getJobS3Keys,
+  getPublicUrl,
+} from "./s3"
 
 export const createJob = mutation({
   args: { inputUrl: v.string(), fileName: v.string() },
@@ -59,17 +45,7 @@ export const triggerModalJob = action({
     }
 
     const outputKey = `outputs/${args.jobId}.png`
-
-    const command = new PutObjectCommand({
-      Bucket: process.env.S3_BUCKET_NAME!,
-      Key: outputKey,
-      ContentType: "image/png",
-    })
-
-    const modalUploadUrl = await getSignedUrl(storageClient, command, {
-      expiresIn: 900,
-    })
-
+    const modalUploadUrl = await createPresignedPutUrl(outputKey, "image/png", 900)
     const finalDownloadUrl = getPublicUrl(outputKey)
     const callbackUrl = `${process.env.CONVEX_SITE_URL}/updateJobStatus`
 
@@ -122,10 +98,47 @@ export const getJobForDeletion = internalQuery({
   },
 })
 
+export const getJobForBackgroundUpdate = internalQuery({
+  args: { jobId: v.id("jobs"), clerkUserId: v.string() },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId)
+    if (!job || job.userId !== args.clerkUserId) {
+      throw new Error("Not found")
+    }
+    return job
+  },
+})
+
 export const deleteJobRecord = internalMutation({
   args: { jobId: v.id("jobs") },
   handler: async (ctx, args) => {
     await ctx.db.delete(args.jobId)
+  },
+})
+
+export const patchJobBackground = internalMutation({
+  args: {
+    jobId: v.id("jobs"),
+    background: v.union(
+      v.object({
+        type: v.literal("solid"),
+        color: v.string(),
+      }),
+      v.object({
+        type: v.literal("image"),
+        imageUrl: v.string(),
+        fileName: v.optional(v.string()),
+      }),
+      v.null()
+    ),
+  },
+  handler: async (ctx, args) => {
+    if (args.background === null) {
+      await ctx.db.patch(args.jobId, { background: undefined })
+      return
+    }
+
+    await ctx.db.patch(args.jobId, { background: args.background })
   },
 })
 
@@ -142,39 +155,9 @@ export const deleteJobAndFiles = action({
       clerkUserId: identity.subject,
     })
 
-    if (job.inputUrl) {
-      const inputKey = job.inputUrl.replace(
-        process.env.S3_PUBLIC_URL_BASE + "/",
-        ""
-      )
-      try {
-        await storageClient.send(
-          new DeleteObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME!,
-            Key: inputKey,
-          })
-        )
-      } catch {
-        /* ignore */
-      }
-    }
-
-    if (job.outputUrl) {
-      const outputKey = job.outputUrl.replace(
-        process.env.S3_PUBLIC_URL_BASE + "/",
-        ""
-      )
-      try {
-        await storageClient.send(
-          new DeleteObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME!,
-            Key: outputKey,
-          })
-        )
-      } catch {
-        /* ignore */
-      }
-    }
+    await Promise.allSettled(
+      getJobS3Keys(job).map((key) => deleteS3Object(key))
+    )
 
     await ctx.runMutation(internal.jobs.deleteJobRecord, { jobId: args.jobId })
   },
@@ -225,28 +208,9 @@ export const clearCompletedWithFiles = action({
 
     if (jobsToDelete.length === 0) return
 
-    const keysToDelete: string[] = []
-    for (const job of jobsToDelete) {
-      if (job.inputUrl)
-        keysToDelete.push(
-          job.inputUrl.replace(process.env.S3_PUBLIC_URL_BASE + "/", "")
-        )
-      if (job.outputUrl)
-        keysToDelete.push(
-          job.outputUrl.replace(process.env.S3_PUBLIC_URL_BASE + "/", "")
-        )
-    }
+    const keysToDelete = jobsToDelete.flatMap((job) => getJobS3Keys(job))
 
-    await Promise.allSettled(
-      keysToDelete.map((key) =>
-        storageClient.send(
-          new DeleteObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME!,
-            Key: key,
-          })
-        )
-      )
-    )
+    await Promise.allSettled(keysToDelete.map((key) => deleteS3Object(key)))
 
     await ctx.runMutation(internal.jobs.deleteJobRecordsBatch, {
       jobIds: jobsToDelete.map((j) => j._id),
@@ -273,10 +237,43 @@ const backgroundValidator = v.union(
     type: v.literal("solid"),
     color: v.string(),
   }),
+  v.object({
+    type: v.literal("image"),
+    imageUrl: v.string(),
+    fileName: v.optional(v.string()),
+  }),
   v.null()
 )
 
-export const updateJobBackground = mutation({
+export const getBackgroundUploadUrl = action({
+  args: {
+    jobId: v.id("jobs"),
+    fileName: v.string(),
+    contentType: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) {
+      throw new Error("Unauthorized")
+    }
+
+    await ctx.runQuery(internal.jobs.getJobForBackgroundUpdate, {
+      jobId: args.jobId,
+      clerkUserId: identity.subject,
+    })
+
+    const key = buildBackgroundKey(args.jobId, args.fileName)
+    const uploadUrl = await createPresignedPutUrl(key, args.contentType)
+
+    return {
+      uploadUrl,
+      imageUrl: getPublicUrl(key),
+      key,
+    }
+  },
+})
+
+export const updateJobBackground = action({
   args: {
     jobId: v.id("jobs"),
     background: backgroundValidator,
@@ -287,17 +284,25 @@ export const updateJobBackground = mutation({
       throw new Error("Unauthorized")
     }
 
-    const job = await ctx.db.get(args.jobId)
-    if (!job || job.userId !== identity.subject) {
-      throw new Error("Not found")
+    const job = await ctx.runQuery(internal.jobs.getJobForBackgroundUpdate, {
+      jobId: args.jobId,
+      clerkUserId: identity.subject,
+    })
+
+    const newImageUrl =
+      args.background?.type === "image" ? args.background.imageUrl : null
+
+    if (job.background?.type === "image") {
+      const oldImageUrl = job.background.imageUrl
+      if (!newImageUrl || oldImageUrl !== newImageUrl) {
+        await deleteS3ObjectByUrl(oldImageUrl)
+      }
     }
 
-    if (args.background === null) {
-      await ctx.db.patch(args.jobId, { background: undefined })
-      return
-    }
-
-    await ctx.db.patch(args.jobId, { background: args.background })
+    await ctx.runMutation(internal.jobs.patchJobBackground, {
+      jobId: args.jobId,
+      background: args.background,
+    })
   },
 })
 

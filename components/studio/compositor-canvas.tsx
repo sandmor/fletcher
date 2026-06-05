@@ -36,7 +36,7 @@ export function CompositorCanvas({
         const foreground = await loadForegroundImage(foregroundUrl)
         if (cancelled) return
 
-        const canvas = compositeImage(foreground, background)
+        const canvas = await compositeImage(foreground, background)
         const displayCanvas = canvasRef.current
         if (!displayCanvas) return
 

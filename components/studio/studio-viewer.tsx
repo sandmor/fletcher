@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react"
 import Image from "next/image"
-import { useMutation } from "convex/react"
+import { useAction } from "convex/react"
 import { ChevronsLeftRight } from "lucide-react"
 import { api } from "@/convex/_generated/api"
 import { Doc, Id } from "@/convex/_generated/dataModel"
@@ -10,7 +10,6 @@ import { Card, CardContent } from "@/components/ui/card"
 import { CompositorCanvas } from "@/components/studio/compositor-canvas"
 import { BackgroundPicker } from "@/components/studio/background-picker"
 import { TransparencyBackground } from "@/components/studio/transparency-background"
-import type { BackgroundConfig } from "@/lib/background"
 import { cn } from "@/lib/utils"
 
 type StudioTab = "edit" | "compare" | "original"
@@ -22,10 +21,10 @@ interface StudioViewerProps {
 export function StudioViewer({ job }: StudioViewerProps) {
   const [activeTab, setActiveTab] = useState<StudioTab>("edit")
   const [sliderPos, setSliderPos] = useState(50)
-  const updateBackground = useMutation(api.jobs.updateJobBackground)
+  const updateBackground = useAction(api.jobs.updateJobBackground)
 
-  const handleBackgroundChange = useCallback(
-    (background: BackgroundConfig) => {
+  const handleSolidChange = useCallback(
+    (background: { type: "solid"; color: string }) => {
       void updateBackground({
         jobId: job._id as Id<"jobs">,
         background,
@@ -148,8 +147,9 @@ export function StudioViewer({ job }: StudioViewerProps) {
                 Background
               </h2>
               <BackgroundPicker
+                jobId={job._id}
                 value={job.background}
-                onChange={handleBackgroundChange}
+                onSolidChange={handleSolidChange}
                 onClear={handleBackgroundClear}
               />
             </CardContent>

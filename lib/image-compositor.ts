@@ -16,10 +16,25 @@ export async function loadForegroundImage(
   return loadImage(foregroundUrl)
 }
 
-export function compositeImage(
+function drawImageCover(
+  context: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  width: number,
+  height: number
+) {
+  const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight)
+  const drawWidth = image.naturalWidth * scale
+  const drawHeight = image.naturalHeight * scale
+  const offsetX = (width - drawWidth) / 2
+  const offsetY = (height - drawHeight) / 2
+
+  context.drawImage(image, offsetX, offsetY, drawWidth, drawHeight)
+}
+
+export async function compositeImage(
   foreground: HTMLImageElement,
   background?: BackgroundConfig
-): HTMLCanvasElement {
+): Promise<HTMLCanvasElement> {
   const canvas = document.createElement("canvas")
   canvas.width = foreground.naturalWidth
   canvas.height = foreground.naturalHeight
@@ -32,6 +47,9 @@ export function compositeImage(
   if (background?.type === "solid") {
     context.fillStyle = background.color
     context.fillRect(0, 0, canvas.width, canvas.height)
+  } else if (background?.type === "image") {
+    const backgroundImage = await loadImage(background.imageUrl)
+    drawImageCover(context, backgroundImage, canvas.width, canvas.height)
   }
 
   context.drawImage(foreground, 0, 0, canvas.width, canvas.height)

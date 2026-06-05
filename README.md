@@ -5,7 +5,7 @@ Upload images, remove backgrounds with AI, and apply quick post-processing edits
 ## Features
 
 - **Background removal** — GPU-accelerated cutout via Modal and BiRefNet/rembg
-- **Solid background compositing** — add a solid-color background to cutouts in the image studio
+- **Background compositing** — add a solid color or uploaded image background to cutouts in the image studio
 - **Live job queue** — real-time status updates across tabs via Convex
 - **Compare view** — before/after slider on the detail page
 
@@ -109,18 +109,41 @@ The backend offloads image processing to a [Modal](https://modal.com) app define
 
 After background removal completes, open a job at `/details/[id]` to use the image studio.
 
-| Tab       | Purpose                                              |
-| --------- | ---------------------------------------------------- |
-| **Edit**  | Live canvas preview with solid-color background picker |
-| **Compare** | Before/after slider                                  |
-| **Original** | View the uploaded source image                      |
+| Tab          | Purpose                                                    |
+| ------------ | ---------------------------------------------------------- |
+| **Edit**     | Live canvas preview with color or image background picker  |
+| **Compare**  | Before/after slider                                        |
+| **Original** | View the uploaded source image                             |
 
-Background settings are saved on the job record in Convex (`background: { type: "solid", color: "#..." }`). The transparent cutout (`outputUrl`) is always preserved in S3 — compositing happens client-side at preview and download time.
+### Background types
 
-Download behavior:
+| Type    | Storage | Compositing |
+| ------- | ------- | ----------- |
+| `solid` | Color saved on the job record in Convex | Solid fill behind the cutout |
+| `image` | Uploaded to S3 at `backgrounds/{jobId}/…`, URL saved on the job record | Cover-fit (fills canvas, center-cropped) |
+
+The transparent cutout (`outputUrl`) is always preserved in S3 — compositing happens client-side at preview and download time.
+
+### Background upload flow
+
+1. User picks an image in the studio → `getBackgroundUploadUrl` (Convex action, job ownership verified)
+2. Client uploads directly to S3 via presigned PUT
+3. `updateJobBackground` action saves `{ type: "image", imageUrl, fileName }` on the job
+
+Solid color changes use the same `updateJobBackground` action.
+
+### Download behavior
 
 - **No background set** — downloads the transparent PNG from S3
-- **Background set** — composites foreground + color in the browser and downloads a flattened PNG
+- **Background set** — composites foreground + background in the browser and downloads a flattened PNG
+
+### Background lifecycle
+
+Background images are deleted from S3 when:
+
+- The job is deleted (`deleteJobAndFiles`)
+- Completed/failed jobs are cleared (`clearCompletedWithFiles`)
+- The background is removed or replaced (`updateJobBackground`)
 
 Key files:
 
@@ -128,9 +151,11 @@ Key files:
 | ---- | ---- |
 | `components/studio/studio-viewer.tsx` | Edit / compare / original tabs |
 | `components/studio/compositor-canvas.tsx` | Canvas preview |
-| `components/studio/background-picker.tsx` | Color presets and custom picker |
+| `components/studio/background-picker.tsx` | Color and image background picker |
+| `hooks/use-background-image-upload.ts` | Presign → upload → apply flow |
 | `lib/image-compositor.ts` | Canvas compositing and export |
-| `convex/jobs.ts` | `updateJobBackground` mutation |
+| `convex/jobs.ts` | `getBackgroundUploadUrl`, `updateJobBackground` actions |
+| `convex/s3.ts` | S3 key helpers and `getJobS3Keys` for deletion |
 
 ## Convex
 
@@ -205,8 +230,8 @@ If you skip setting the S3 variables, actions like `triggerModalJob` will fail w
 3. `triggerModalJob` generates a secure presigned upload URL for the final output and passes it alongside a unique `MODAL_CALLBACK_SECRET` to the external Modal worker.
 4. The Modal worker processes the image, pushes the results back to a secure Convex HTTP endpoint (`/updateJobStatus`), and provides the secret header. The endpoint validates this secret and runs an `internalMutation` to update the job status.
 5. The UI updates instantly because the frontend components are reactively subscribed to live Convex queries.
-6. On the detail page, the user can pick a solid background color. The choice is saved via `updateJobBackground` and composited in the browser for preview and download.
-7. Deleting a job or clearing the queue triggers a single server-side action (`deleteJobAndFiles` or `clearCompletedWithFiles`). This securely verifies user ownership, deletes the corresponding files from S3 in a best-effort batch, and removes the database records entirely on the server.
+6. On the detail page, the user can pick a solid color or upload an image background. The choice is saved via `updateJobBackground` and composited in the browser for preview and download. Image backgrounds are stored under `backgrounds/{jobId}/` in S3.
+7. Deleting a job or clearing the queue triggers a single server-side action (`deleteJobAndFiles` or `clearCompletedWithFiles`). This securely verifies user ownership, deletes input, output, and background image files from S3 in a best-effort batch, and removes the database records entirely on the server.
 
 ### Job schema
 
@@ -216,7 +241,7 @@ Each job in Convex stores:
 | ------------ | ------------------------------------------------ |
 | `inputUrl`   | Original uploaded image                          |
 | `outputUrl`  | Transparent PNG cutout (after processing)        |
-| `background` | Optional `{ type: "solid", color: "#RRGGBB" }`   |
+| `background` | Optional `{ type: "solid", color }` or `{ type: "image", imageUrl, fileName? }` |
 | `status`     | `pending` / `processing` / `completed` / `failed` |
 | `fileName`   | Original file name                               |
 
@@ -224,4 +249,4 @@ Each job in Convex stores:
 
 - `S3_PUBLIC_URL_BASE` is used consistently on both the frontend (via `lib/s3-url.ts`) and the Convex backend (via `getPublicUrl`) to build object URLs. It must be set for both environments.
 - The Modal webhook (`/updateJobStatus`) requires the `x-callback-secret` header to match `MODAL_CALLBACK_SECRET`. Requests without a valid secret are rejected with `401`.
-- S3 objects must allow cross-origin reads from your app domain so the canvas compositor can load cutout images without tainting the canvas.
+- S3 objects must allow cross-origin reads from your app domain so the canvas compositor can load cutout and background images without tainting the canvas.

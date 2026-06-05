@@ -15,10 +15,17 @@ export default defineSchema({
     error: v.optional(v.string()),
     fileName: v.string(),
     background: v.optional(
-      v.object({
-        type: v.literal("solid"),
-        color: v.string(),
-      })
+      v.union(
+        v.object({
+          type: v.literal("solid"),
+          color: v.string(),
+        }),
+        v.object({
+          type: v.literal("image"),
+          imageUrl: v.string(),
+          fileName: v.optional(v.string()),
+        })
+      )
     ),
   }).index("by_user_and_status", ["userId", "status"]),
 })

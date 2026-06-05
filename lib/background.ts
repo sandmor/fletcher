@@ -1,7 +1,6 @@
-export type BackgroundConfig = {
-  type: "solid"
-  color: string
-}
+export type BackgroundConfig =
+  | { type: "solid"; color: string }
+  | { type: "image"; imageUrl: string; fileName?: string }
 
 export const PRESET_COLORS = [
   { label: "White", value: "#FFFFFF" },
