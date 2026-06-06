@@ -60,7 +60,8 @@ export function QueueWidget() {
     }
   }, [dismissFinishedFromQueue])
 
-  if (jobs.length === 0 && status === "LoadingFirstPage") return null
+  if (status === "LoadingFirstPage") return null
+  if (jobs.length === 0) return null
 
   return (
     <div className="fixed right-6 bottom-6 z-50 flex flex-col items-end">

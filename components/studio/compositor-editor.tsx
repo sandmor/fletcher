@@ -643,6 +643,11 @@ export function CompositorEditor({
     panOffset
   )
   const layersDraggable = !isSpacePressed && !isPanning
+  const backgroundListening =
+    selectedLayer === "background" && layersDraggable
+  const foregroundListening =
+    selectedLayer === "foreground" && layersDraggable
+  const frameListening = selectedLayer === "frame"
 
   return (
     <div className={cn("flex h-full w-full flex-col gap-3", className)}>
@@ -662,12 +667,6 @@ export function CompositorEditor({
           scaleY={stageTransform.scale}
           x={stageTransform.x}
           y={stageTransform.y}
-          onMouseDown={(event) => {
-            if (isSpacePressedRef.current || event.evt.button === 1) return
-            if (event.target === event.target.getStage()) {
-              selectLayer("foreground")
-            }
-          }}
         >
           <Layer>
             {backgroundStage &&
@@ -681,8 +680,7 @@ export function CompositorEditor({
                   width={backgroundStage.width}
                   height={backgroundStage.height}
                   draggable={layersDraggable}
-                  onClick={() => selectLayer("background")}
-                  onTap={() => selectLayer("background")}
+                  listening={backgroundListening}
                   onDragEnd={() => handleDragEnd("background")}
                   onTransformEnd={() => handleTransformEnd("background")}
                 />
@@ -697,8 +695,7 @@ export function CompositorEditor({
                 height={backgroundStage.height}
                 fill={background.color}
                 draggable={layersDraggable}
-                onClick={() => selectLayer("background")}
-                onTap={() => selectLayer("background")}
+                listening={backgroundListening}
                 onDragEnd={() => handleDragEnd("background")}
                 onTransformEnd={() => handleTransformEnd("background")}
               />
@@ -712,8 +709,7 @@ export function CompositorEditor({
               width={foregroundStage.width}
               height={foregroundStage.height}
               draggable={layersDraggable}
-              onClick={() => selectLayer("foreground")}
-              onTap={() => selectLayer("foreground")}
+              listening={foregroundListening}
               onDragEnd={() => handleDragEnd("foreground")}
               onTransformEnd={() => handleTransformEnd("foreground")}
             />
@@ -741,8 +737,7 @@ export function CompositorEditor({
               dash={[8, 4]}
               fillEnabled={false}
               draggable={false}
-              onClick={() => selectLayer("frame")}
-              onTap={() => selectLayer("frame")}
+              listening={frameListening}
               onTransform={handleFrameTransform}
               onTransformEnd={() => handleTransformEnd("frame")}
             />

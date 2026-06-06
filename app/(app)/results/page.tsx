@@ -53,6 +53,8 @@ export default function ResultsPage() {
   const [deletingIds, setDeletingIds] = useState<Set<Id<"jobs">>>(new Set())
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false)
+  const [singleDeleteJobId, setSingleDeleteJobId] =
+    useState<Id<"jobs"> | null>(null)
 
   const filtered = useMemo(() => {
     if (filter === "all") return jobs
@@ -176,98 +178,27 @@ export default function ResultsPage() {
 
   const selectedCount = selectedIds.size
 
+  const pendingDeleteJob = useMemo(
+    () =>
+      singleDeleteJobId
+        ? jobs.find((job) => job._id === singleDeleteJobId)
+        : undefined,
+    [jobs, singleDeleteJobId]
+  )
+
+  const isSingleDeleting =
+    singleDeleteJobId !== null && deletingIds.has(singleDeleteJobId)
+
   return (
     <>
       <main
         className={cn(
-          "mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8",
+          "mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8",
           selectionMode && "pb-24 sm:pb-10"
         )}
       >
-        <div className="flex flex-col gap-8">
+        <div className="flex flex-col gap-6">
           <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center justify-between gap-4 sm:justify-start">
-                <h1 className="text-3xl font-bold tracking-tight">Results</h1>
-                {!selectionMode ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="sm:hidden"
-                    onClick={() => enterSelectionMode()}
-                  >
-                    <CheckSquare className="mr-2 h-4 w-4" />
-                    Select
-                  </Button>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="sm:hidden"
-                    onClick={exitSelectionMode}
-                    disabled={isBulkDeleting}
-                  >
-                    Cancel
-                  </Button>
-                )}
-              </div>
-
-              {!selectionMode ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="hidden sm:inline-flex"
-                  onClick={() => enterSelectionMode()}
-                >
-                  <CheckSquare className="mr-2 h-4 w-4" />
-                  Select
-                </Button>
-              ) : (
-                <div className="hidden flex-wrap items-center gap-2 sm:flex">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={exitSelectionMode}
-                    disabled={isBulkDeleting}
-                  >
-                    Cancel
-                  </Button>
-                  <span className="px-1 text-sm font-medium text-muted-foreground">
-                    {selectedCount} selected
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="select-all-desktop"
-                      checked={
-                        allFilteredSelected
-                          ? true
-                          : someFilteredSelected
-                            ? "indeterminate"
-                            : false
-                      }
-                      onCheckedChange={toggleSelectAllFiltered}
-                      disabled={filtered.length === 0 || isBulkDeleting}
-                    />
-                    <Label
-                      htmlFor="select-all-desktop"
-                      className="cursor-pointer text-sm font-normal normal-case tracking-normal"
-                    >
-                      Select all
-                    </Label>
-                  </div>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    disabled={selectedCount === 0 || isBulkDeleting}
-                    onClick={() => setBulkDeleteDialogOpen(true)}
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Delete
-                  </Button>
-                </div>
-              )}
-            </div>
-
             <div className="flex flex-wrap items-center gap-2">
               {tabs.map((tab) => (
                 <button
@@ -295,6 +226,61 @@ export default function ResultsPage() {
                 </button>
               ))}
             </div>
+
+            {!selectionMode ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-fit"
+                onClick={() => enterSelectionMode()}
+              >
+                <CheckSquare className="mr-2 h-4 w-4" />
+                Select
+              </Button>
+            ) : (
+              <div className="hidden flex-wrap items-center gap-2 sm:flex">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={exitSelectionMode}
+                  disabled={isBulkDeleting}
+                >
+                  Cancel
+                </Button>
+                <span className="px-1 text-sm font-medium text-muted-foreground">
+                  {selectedCount} selected
+                </span>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="select-all-desktop"
+                    checked={
+                      allFilteredSelected
+                        ? true
+                        : someFilteredSelected
+                          ? "indeterminate"
+                          : false
+                    }
+                    onCheckedChange={toggleSelectAllFiltered}
+                    disabled={filtered.length === 0 || isBulkDeleting}
+                  />
+                  <Label
+                    htmlFor="select-all-desktop"
+                    className="cursor-pointer text-sm font-normal normal-case tracking-normal"
+                  >
+                    Select all
+                  </Label>
+                </div>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  disabled={selectedCount === 0 || isBulkDeleting}
+                  onClick={() => setBulkDeleteDialogOpen(true)}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
+                </Button>
+              </div>
+            )}
           </div>
 
           {status === "LoadingFirstPage" ? (
@@ -330,7 +316,7 @@ export default function ResultsPage() {
                     selected={selectedIds.has(job._id)}
                     onToggleSelect={() => toggleSelect(job._id)}
                     onEnterSelectionMode={() => enterSelectionMode(job._id)}
-                    onDelete={() => void handleSingleDelete(job._id)}
+                    onDelete={() => setSingleDeleteJobId(job._id)}
                     isDeleting={deletingIds.has(job._id)}
                   />
                 ))}
@@ -437,6 +423,59 @@ export default function ResultsPage() {
               }}
             >
               {isBulkDeleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={singleDeleteJobId !== null}
+        onOpenChange={(open) => {
+          if (!open && !isSingleDeleting) {
+            setSingleDeleteJobId(null)
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this job?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDeleteJob ? (
+                <>
+                  <span className="font-medium text-foreground">
+                    {pendingDeleteJob.fileName}
+                  </span>{" "}
+                  will be permanently deleted along with its files. This action
+                  cannot be undone.
+                </>
+              ) : (
+                "This will permanently delete the job and its files. This action cannot be undone."
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSingleDeleting}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={isSingleDeleting || !singleDeleteJobId}
+              onClick={(e) => {
+                e.preventDefault()
+                if (!singleDeleteJobId) return
+                void handleSingleDelete(singleDeleteJobId).finally(() => {
+                  setSingleDeleteJobId(null)
+                })
+              }}
+            >
+              {isSingleDeleting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Deleting…
@@ -571,7 +610,10 @@ function JobCard({
               size="icon"
               className="absolute top-3 left-3 z-30 h-8 w-8 bg-background/90 opacity-100 shadow-sm backdrop-blur-sm sm:opacity-0 sm:group-hover:opacity-100"
               disabled={isDeleting}
-              onClick={onDelete}
+              onClick={(e) => {
+                e.stopPropagation()
+                onDelete()
+              }}
               aria-label={`Delete ${job.fileName}`}
             >
               {isDeleting ? (
