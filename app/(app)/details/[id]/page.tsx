@@ -1,9 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Image from "next/image"
 import { useParams, useRouter } from "next/navigation"
 import { useQuery } from "convex/react"
+import { toast } from "sonner"
 import { api } from "@/convex/_generated/api"
 import { Id } from "@/convex/_generated/dataModel"
 import { Button } from "@/components/ui/button"
@@ -34,6 +35,26 @@ export default function DetailPage() {
   const rawId = Array.isArray(params.id) ? params.id[0] : params.id
   const id = rawId ? (rawId as Id<"jobs">) : null
   const job = useQuery(api.jobs.getJobById, id ? { id } : "skip")
+  const hadLoadedJobRef = useRef(false)
+  const publishEnabledRef = useRef(true)
+
+  if (job !== undefined && job !== null) {
+    publishEnabledRef.current = true
+  } else if (job === null && hadLoadedJobRef.current) {
+    publishEnabledRef.current = false
+  }
+
+  useEffect(() => {
+    if (job !== undefined && job !== null) {
+      hadLoadedJobRef.current = true
+      return
+    }
+
+    if (job === null && hadLoadedJobRef.current) {
+      toast.error("This image was deleted")
+      hadLoadedJobRef.current = false
+    }
+  }, [job])
 
   const handleDownload = async () => {
     if (!job?.outputUrl) return
@@ -74,7 +95,7 @@ export default function DetailPage() {
         <div className="space-y-1">
           <h1 className="text-xl font-semibold">Image not found</h1>
           <p className="text-sm text-muted-foreground">
-            The requested image might have been deleted.
+            This image may have been deleted or you may not have access to it.
           </p>
         </div>
         <Button
@@ -142,7 +163,10 @@ export default function DetailPage() {
       </div>
 
       {showResult && job.outputUrl ? (
-        <StudioViewer job={{ ...job, outputUrl: job.outputUrl }} />
+        <StudioViewer
+          job={{ ...job, outputUrl: job.outputUrl }}
+          publishEnabledRef={publishEnabledRef}
+        />
       ) : (
         <Card className="overflow-hidden border-border shadow-sm">
           <CardContent className="relative p-0">

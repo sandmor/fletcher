@@ -1,7 +1,7 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState, type MutableRefObject } from "react"
 import Image from "next/image"
 import { ChevronsLeftRight } from "lucide-react"
 import { Doc, Id } from "@/convex/_generated/dataModel"
@@ -11,8 +11,10 @@ import { CompositorPreview } from "@/components/studio/compositor-canvas"
 import { BackgroundPicker } from "@/components/studio/background-picker"
 import { TransparencyBackground } from "@/components/studio/transparency-background"
 import { usePublishStudioResult } from "@/hooks/use-publish-studio-result"
+import { useStudioJobSync } from "@/hooks/use-studio-job-sync"
 import type { BackgroundConfig } from "@/lib/background"
 import type { CompositionLayout } from "@/lib/composition-layout"
+import { getStudioRevision } from "@/lib/studio/job-studio-revision"
 import { cn } from "@/lib/utils"
 
 const CompositorEditor = dynamic(
@@ -34,28 +36,60 @@ type StudioTab = "edit" | "compare" | "original"
 
 interface StudioViewerProps {
   job: Doc<"jobs"> & { outputUrl: string }
+  publishEnabledRef: MutableRefObject<boolean>
 }
 
-export function StudioViewer({ job }: StudioViewerProps) {
+export function StudioViewer({ job, publishEnabledRef }: StudioViewerProps) {
   const [activeTab, setActiveTab] = useState<StudioTab>("edit")
   const [sliderPos, setSliderPos] = useState(50)
   const [advancedLayout, setAdvancedLayout] = useState(false)
   const [previewBackground, setPreviewBackground] = useState<
     BackgroundConfig | undefined
   >()
+  const [editorSessionKey, setEditorSessionKey] = useState(
+    () => `${job._id}-${getStudioRevision(job)}`
+  )
+
+  const resetLocalState = useCallback(() => {
+    setPreviewBackground(undefined)
+  }, [])
+
   const {
     publishing,
+    lastPublishFailedRef,
     publishSolidBackground,
     publishBackgroundImage,
     publishBackgroundClear,
     publishCompositionLayout,
+    clearPendingSolidPublish,
+    cancelPublishQueue,
   } = usePublishStudioResult(job._id as Id<"jobs">, job.outputUrl, {
-    onFailure: () => setPreviewBackground(undefined),
+    enabled: publishEnabledRef.current,
+    enabledRef: publishEnabledRef,
+    onFailure: resetLocalState,
+  })
+
+  useStudioJobSync({
+    job,
+    publishing,
+    advancedLayout,
+    lastPublishFailedRef,
+    onResetLocalState: resetLocalState,
+    clearPendingPublish: clearPendingSolidPublish,
+    cancelPublishQueue,
+    setAdvancedLayout,
   })
 
   useEffect(() => {
-    setPreviewBackground(undefined)
-  }, [job.background])
+    if (!advancedLayout) {
+      setEditorSessionKey(`${job._id}-${getStudioRevision(job)}`)
+    }
+  }, [job, advancedLayout])
+
+  const openAdvancedLayout = useCallback(() => {
+    setEditorSessionKey(`${job._id}-${getStudioRevision(job)}`)
+    setAdvancedLayout(true)
+  }, [job])
 
   const activeBackground = previewBackground ?? job.background
 
@@ -93,8 +127,11 @@ export function StudioViewer({ job }: StudioViewerProps) {
     async (layout: CompositionLayout) => {
       if (!activeBackground) return
 
-      await publishCompositionLayout(layout, activeBackground)
-      setAdvancedLayout(false)
+      try {
+        await publishCompositionLayout(layout, activeBackground)
+      } finally {
+        setAdvancedLayout(false)
+      }
     },
     [activeBackground, publishCompositionLayout]
   )
@@ -143,6 +180,7 @@ export function StudioViewer({ job }: StudioViewerProps) {
             >
               {activeTab === "edit" && advancedLayout && activeBackground && (
                 <CompositorEditor
+                  key={editorSessionKey}
                   foregroundUrl={job.outputUrl}
                   background={activeBackground}
                   initialLayout={job.compositionLayout}
@@ -226,7 +264,7 @@ export function StudioViewer({ job }: StudioViewerProps) {
                   size="sm"
                   className="text-muted-foreground"
                   disabled={publishing}
-                  onClick={() => setAdvancedLayout(true)}
+                  onClick={openAdvancedLayout}
                 >
                   Adjust positioning
                 </Button>

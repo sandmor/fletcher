@@ -535,7 +535,7 @@ export const getJobById = query({
 
     const job = await ctx.db.get(args.id)
     if (!job || job.userId !== clerkUserId) {
-      throw new Error("Not found")
+      return null
     }
     return job
   },

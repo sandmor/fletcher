@@ -1,6 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from "react"
 import { useAction } from "convex/react"
 import { toast } from "sonner"
 import { api } from "@/convex/_generated/api"
@@ -22,6 +28,19 @@ type PublishArgs = {
 
 type UsePublishStudioResultOptions = {
   onFailure?: () => void
+  enabled?: boolean
+  enabledRef?: MutableRefObject<boolean>
+}
+
+function getPublishErrorMessage(err: unknown): string {
+  if (err instanceof Error && err.message === "Not found") {
+    return "This image was deleted"
+  }
+  return err instanceof Error ? err.message : "Failed to save changes"
+}
+
+function isJobNotFoundError(err: unknown): boolean {
+  return err instanceof Error && err.message === "Not found"
 }
 
 export function usePublishStudioResult(
@@ -29,6 +48,7 @@ export function usePublishStudioResult(
   outputUrl: string,
   options: UsePublishStudioResultOptions = {}
 ) {
+  const { enabled = true, enabledRef: externalEnabledRef } = options
   const getCompositeUploadUrl = useAction(api.jobs.getCompositeUploadUrl)
   const updateJobBackground = useAction(api.jobs.updateJobBackground)
   const saveCompositionLayout = useAction(api.jobs.saveCompositionLayout)
@@ -40,11 +60,23 @@ export function usePublishStudioResult(
   } | null>(null)
   const publishIdRef = useRef(0)
   const publishQueueRef = useRef(Promise.resolve())
+  const internalEnabledRef = useRef(enabled)
+  const lastPublishFailedRef = useRef(false)
   const onFailureRef = useRef(options.onFailure)
+
+  const isEnabled = useCallback(() => {
+    return externalEnabledRef?.current ?? internalEnabledRef.current
+  }, [externalEnabledRef])
 
   useEffect(() => {
     onFailureRef.current = options.onFailure
   }, [options.onFailure])
+
+  useEffect(() => {
+    if (!externalEnabledRef) {
+      internalEnabledRef.current = enabled
+    }
+  }, [enabled, externalEnabledRef])
 
   const deps = {
     getCompositeUploadUrl,
@@ -52,10 +84,38 @@ export function usePublishStudioResult(
     saveCompositionLayout,
   }
 
+  const clearPendingSolidPublish = useCallback(() => {
+    if (solidColorTimeoutRef.current) {
+      clearTimeout(solidColorTimeoutRef.current)
+      solidColorTimeoutRef.current = null
+    }
+    pendingSolidRef.current = null
+  }, [])
+
+  const cancelPublishQueue = useCallback(() => {
+    publishIdRef.current += 1
+    publishQueueRef.current = Promise.resolve()
+    setPublishing(false)
+  }, [])
+
+  const resetPublishState = useCallback(() => {
+    clearPendingSolidPublish()
+    cancelPublishQueue()
+  }, [cancelPublishQueue, clearPendingSolidPublish])
+
   const enqueuePublish = useCallback(
     (args: PublishArgs) => {
+      if (!isEnabled()) {
+        return Promise.resolve()
+      }
+
       const task = async () => {
+        if (!isEnabled()) {
+          return
+        }
+
         const currentPublishId = ++publishIdRef.current
+        lastPublishFailedRef.current = false
         setPublishing(true)
         try {
           await publishStudioResult({
@@ -67,11 +127,12 @@ export function usePublishStudioResult(
             deps,
           })
         } catch (err) {
-          if (currentPublishId === publishIdRef.current) {
-            onFailureRef.current?.()
-            toast.error(
-              err instanceof Error ? err.message : "Failed to save changes"
-            )
+          lastPublishFailedRef.current = true
+          if (currentPublishId === publishIdRef.current && isEnabled()) {
+            if (!isJobNotFoundError(err)) {
+              onFailureRef.current?.()
+            }
+            toast.error(getPublishErrorMessage(err))
           }
           throw err
         } finally {
@@ -85,7 +146,7 @@ export function usePublishStudioResult(
       publishQueueRef.current = next.catch(() => {})
       return next
     },
-    [jobId, outputUrl]
+    [isEnabled, jobId, outputUrl]
   )
 
   useEffect(() => {
@@ -93,6 +154,11 @@ export function usePublishStudioResult(
       if (solidColorTimeoutRef.current) {
         clearTimeout(solidColorTimeoutRef.current)
         solidColorTimeoutRef.current = null
+      }
+
+      if (!isEnabled()) {
+        clearPendingSolidPublish()
+        return
       }
 
       const pending = pendingSolidRef.current
@@ -105,18 +171,12 @@ export function usePublishStudioResult(
         })
       }
     }
-  }, [enqueuePublish])
-
-  const clearPendingSolidPublish = useCallback(() => {
-    if (solidColorTimeoutRef.current) {
-      clearTimeout(solidColorTimeoutRef.current)
-      solidColorTimeoutRef.current = null
-    }
-    pendingSolidRef.current = null
-  }, [])
+  }, [clearPendingSolidPublish, enqueuePublish, isEnabled])
 
   const publishSolidBackground = useCallback(
     (color: string, compositionLayout: CompositionLayout | undefined) => {
+      if (!isEnabled()) return
+
       clearPendingSolidPublish()
       pendingSolidRef.current = { color, compositionLayout }
 
@@ -130,11 +190,13 @@ export function usePublishStudioResult(
         })
       }, SOLID_COLOR_DEBOUNCE_MS)
     },
-    [clearPendingSolidPublish, enqueuePublish]
+    [clearPendingSolidPublish, enqueuePublish, isEnabled]
   )
 
   const publishBackgroundImage = useCallback(
     async (background: Extract<BackgroundConfig, { type: "image" }>) => {
+      if (!isEnabled()) return
+
       clearPendingSolidPublish()
       await enqueuePublish({
         background,
@@ -142,19 +204,23 @@ export function usePublishStudioResult(
         patch: { background },
       })
     },
-    [clearPendingSolidPublish, enqueuePublish]
+    [clearPendingSolidPublish, enqueuePublish, isEnabled]
   )
 
   const publishBackgroundClear = useCallback(async () => {
+    if (!isEnabled()) return
+
     clearPendingSolidPublish()
     await enqueuePublish({
       background: null,
       patch: { background: null },
     })
-  }, [clearPendingSolidPublish, enqueuePublish])
+  }, [clearPendingSolidPublish, enqueuePublish, isEnabled])
 
   const publishCompositionLayout = useCallback(
     async (layout: CompositionLayout, background: BackgroundConfig) => {
+      if (!isEnabled()) return
+
       clearPendingSolidPublish()
       await enqueuePublish({
         background,
@@ -162,14 +228,18 @@ export function usePublishStudioResult(
         patch: { compositionLayout: layout, background },
       })
     },
-    [clearPendingSolidPublish, enqueuePublish]
+    [clearPendingSolidPublish, enqueuePublish, isEnabled]
   )
 
   return {
     publishing,
+    lastPublishFailedRef,
     publishSolidBackground,
     publishBackgroundImage,
     publishBackgroundClear,
     publishCompositionLayout,
+    clearPendingSolidPublish,
+    cancelPublishQueue,
+    resetPublishState,
   }
 }
