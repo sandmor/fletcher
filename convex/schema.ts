@@ -13,6 +13,7 @@ export default defineSchema({
     inputUrl: v.string(),
     outputUrl: v.optional(v.string()),
     compositeUrl: v.optional(v.string()),
+    compositeUpdatedAt: v.optional(v.number()),
     error: v.optional(v.string()),
     fileName: v.string(),
     background: v.optional(

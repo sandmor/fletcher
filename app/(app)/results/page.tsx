@@ -484,6 +484,7 @@ function JobCard({
       <CardContent className="p-0">
         <div className="relative aspect-square overflow-hidden bg-muted">
           <Image
+            key={resultImageUrl ?? job.inputUrl}
             src={showResult && resultImageUrl ? resultImageUrl : job.inputUrl}
             alt={job.fileName}
             fill

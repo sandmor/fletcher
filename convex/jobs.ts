@@ -182,6 +182,7 @@ export const patchJobBackground = internalMutation({
         background: undefined,
         compositionLayout: undefined,
         compositeUrl: undefined,
+        compositeUpdatedAt: undefined,
       })
       return
     }
@@ -190,6 +191,7 @@ export const patchJobBackground = internalMutation({
       background: typeof args.background
       compositionLayout?: undefined
       compositeUrl?: string
+      compositeUpdatedAt?: number
     } = { background: args.background }
 
     if (args.clearCompositionLayout) {
@@ -198,6 +200,7 @@ export const patchJobBackground = internalMutation({
 
     if (args.compositeUrl) {
       patch.compositeUrl = args.compositeUrl
+      patch.compositeUpdatedAt = Date.now()
     }
 
     await ctx.db.patch(args.jobId, patch)
@@ -217,6 +220,7 @@ export const patchJobCompositionLayout = internalMutation({
         background: args.background,
         compositionLayout: undefined,
         compositeUrl: args.compositeUrl,
+        compositeUpdatedAt: Date.now(),
       })
       return
     }
@@ -225,6 +229,7 @@ export const patchJobCompositionLayout = internalMutation({
       background: args.background,
       compositionLayout: args.compositionLayout,
       compositeUrl: args.compositeUrl,
+      compositeUpdatedAt: Date.now(),
     })
   },
 })
