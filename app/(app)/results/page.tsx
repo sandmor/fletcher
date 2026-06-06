@@ -35,8 +35,6 @@ import { cn } from "@/lib/utils"
 import { Doc, Id } from "@/convex/_generated/dataModel"
 import { useLongPress } from "@/hooks/use-long-press"
 
-type Filter = "all" | "completed" | "processing" | "pending" | "failed"
-
 export default function ResultsPage() {
   const {
     results: jobs,
@@ -47,7 +45,6 @@ export default function ResultsPage() {
   const deleteJobAndFiles = useAction(api.jobs.deleteJobAndFiles)
   const deleteJobsAndFiles = useAction(api.jobs.deleteJobsAndFiles)
 
-  const [filter, setFilter] = useState<Filter>("all")
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<Id<"jobs">>>(new Set())
   const [deletingIds, setDeletingIds] = useState<Set<Id<"jobs">>>(new Set())
@@ -56,38 +53,12 @@ export default function ResultsPage() {
   const [singleDeleteJobId, setSingleDeleteJobId] =
     useState<Id<"jobs"> | null>(null)
 
-  const filtered = useMemo(() => {
-    if (filter === "all") return jobs
-    return jobs.filter((j) => j.status === filter)
-  }, [jobs, filter])
+  const jobIds = useMemo(() => new Set(jobs.map((j) => j._id)), [jobs])
 
-  const filteredIds = useMemo(
-    () => new Set(filtered.map((j) => j._id)),
-    [filtered]
-  )
+  const allSelected =
+    jobs.length > 0 && jobs.every((j) => selectedIds.has(j._id))
 
-  const allFilteredSelected =
-    filtered.length > 0 && filtered.every((j) => selectedIds.has(j._id))
-
-  const someFilteredSelected = filtered.some((j) => selectedIds.has(j._id))
-
-  const counts = useMemo(() => {
-    return {
-      all: jobs.length,
-      completed: jobs.filter((j) => j.status === "completed").length,
-      processing: jobs.filter((j) => j.status === "processing").length,
-      pending: jobs.filter((j) => j.status === "pending").length,
-      failed: jobs.filter((j) => j.status === "failed").length,
-    }
-  }, [jobs])
-
-  const tabs: { value: Filter; label: string; count: number }[] = [
-    { value: "all", label: "All", count: counts.all },
-    { value: "completed", label: "Completed", count: counts.completed },
-    { value: "processing", label: "Processing", count: counts.processing },
-    { value: "pending", label: "Pending", count: counts.pending },
-    { value: "failed", label: "Failed", count: counts.failed },
-  ]
+  const someSelected = jobs.some((j) => selectedIds.has(j._id))
 
   const exitSelectionMode = useCallback(() => {
     setSelectionMode(false)
@@ -113,21 +84,21 @@ export default function ResultsPage() {
     })
   }, [])
 
-  const toggleSelectAllFiltered = useCallback(() => {
+  const toggleSelectAll = useCallback(() => {
     setSelectedIds((prev) => {
       const next = new Set(prev)
-      if (allFilteredSelected) {
-        for (const id of filteredIds) {
+      if (allSelected) {
+        for (const id of jobIds) {
           next.delete(id)
         }
       } else {
-        for (const id of filteredIds) {
+        for (const id of jobIds) {
           next.add(id)
         }
       }
       return next
     })
-  }, [allFilteredSelected, filteredIds])
+  }, [allSelected, jobIds])
 
   const handleSingleDelete = useCallback(
     async (jobId: Id<"jobs">) => {
@@ -199,34 +170,6 @@ export default function ResultsPage() {
       >
         <div className="flex flex-col gap-6">
           <div className="flex flex-col gap-4">
-            <div className="flex flex-wrap items-center gap-2">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.value}
-                  onClick={() => setFilter(tab.value)}
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors",
-                    filter === tab.value
-                      ? "bg-primary text-primary-foreground shadow-sm"
-                      : "bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                  )}
-                >
-                  {tab.label}
-                  <span
-                    className={cn(
-                      "flex h-5 items-center justify-center rounded-full px-1.5 text-[10px]",
-                      filter === tab.value
-                        ? "bg-primary-foreground/20 text-primary-foreground"
-                        : "bg-background text-muted-foreground"
-                    )}
-                  >
-                    {tab.count}
-                    {status === "CanLoadMore" && "+"}
-                  </span>
-                </button>
-              ))}
-            </div>
-
             {!selectionMode ? (
               <Button
                 variant="outline"
@@ -254,14 +197,14 @@ export default function ResultsPage() {
                   <Checkbox
                     id="select-all-desktop"
                     checked={
-                      allFilteredSelected
+                      allSelected
                         ? true
-                        : someFilteredSelected
+                        : someSelected
                           ? "indeterminate"
                           : false
                     }
-                    onCheckedChange={toggleSelectAllFiltered}
-                    disabled={filtered.length === 0 || isBulkDeleting}
+                    onCheckedChange={toggleSelectAll}
+                    disabled={jobs.length === 0 || isBulkDeleting}
                   />
                   <Label
                     htmlFor="select-all-desktop"
@@ -290,15 +233,15 @@ export default function ResultsPage() {
                 Loading your jobs...
               </p>
             </div>
-          ) : filtered.length === 0 ? (
+          ) : jobs.length === 0 ? (
             <div className="animate-fade-in flex flex-col items-center justify-center gap-5 rounded-2xl border-2 border-dashed border-border/50 bg-card/50 py-24 text-center">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted">
                 <ImageOff className="h-8 w-8 text-muted-foreground" />
               </div>
               <div className="flex flex-col gap-1">
-                <h3 className="text-lg font-semibold">No images found</h3>
+                <h3 className="text-lg font-semibold">No images yet</h3>
                 <p className="text-sm text-muted-foreground">
-                  No images match this filter in your loaded items.
+                  Upload images to get started.
                 </p>
               </div>
               <Button asChild variant="outline" className="mt-2">
@@ -308,7 +251,7 @@ export default function ResultsPage() {
           ) : (
             <div className="flex flex-col gap-8">
               <div className="animate-fade-in grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {filtered.map((job) => (
+                {jobs.map((job) => (
                   <JobCard
                     key={job._id}
                     job={job}
@@ -357,14 +300,14 @@ export default function ResultsPage() {
               <Checkbox
                 id="select-all-mobile"
                 checked={
-                  allFilteredSelected
+                  allSelected
                     ? true
-                    : someFilteredSelected
+                    : someSelected
                       ? "indeterminate"
                       : false
                 }
-                onCheckedChange={toggleSelectAllFiltered}
-                disabled={filtered.length === 0 || isBulkDeleting}
+                onCheckedChange={toggleSelectAll}
+                disabled={jobs.length === 0 || isBulkDeleting}
               />
               <Label
                 htmlFor="select-all-mobile"
@@ -624,20 +567,6 @@ function JobCard({
             </Button>
           )}
 
-          {showResult && !selectionMode && (
-            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/40 opacity-0 backdrop-blur-[2px] transition-opacity duration-300 group-hover:opacity-100">
-              <Button
-                variant="default"
-                size="sm"
-                className="pointer-events-auto shadow-lg"
-                onClick={handleDownload}
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Download
-              </Button>
-            </div>
-          )}
-
           <div className="pointer-events-none absolute top-3 right-3 z-30">
             {selectionMode ? (
               <div
@@ -656,6 +585,19 @@ function JobCard({
                   strokeWidth={3}
                 />
               </div>
+            ) : showResult ? (
+              <Button
+                variant="secondary"
+                size="icon"
+                className="pointer-events-auto h-8 w-8 bg-background/90 shadow-sm backdrop-blur-sm"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleDownload()
+                }}
+                aria-label={`Download ${job.fileName}`}
+              >
+                <Download className="h-4 w-4" />
+              </Button>
             ) : (
               <StatusBadge status={job.status} />
             )}
@@ -698,12 +640,6 @@ function JobCard({
 }
 
 function StatusBadge({ status }: { status: string }) {
-  if (status === "completed")
-    return (
-      <Badge className="border border-emerald-500/20 bg-emerald-500/10 text-emerald-600 shadow-none hover:bg-emerald-500/20">
-        Completed
-      </Badge>
-    )
   if (status === "processing")
     return (
       <Badge className="border border-primary/20 bg-primary/10 text-primary shadow-none hover:bg-primary/20">
