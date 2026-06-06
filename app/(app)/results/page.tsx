@@ -32,6 +32,7 @@ import {
   Check,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { getResultImageUrl } from "@/lib/job-result-image"
 import { Doc, Id } from "@/convex/_generated/dataModel"
 import { useLongPress } from "@/hooks/use-long-press"
 
@@ -452,6 +453,7 @@ function JobCard({
   isDeleting?: boolean
 }) {
   const showResult = job.status === "completed" && job.outputUrl
+  const resultImageUrl = getResultImageUrl(job)
   const isFailed = job.status === "failed"
   const isPendingOrProcessing =
     job.status === "pending" || job.status === "processing"
@@ -462,8 +464,11 @@ function JobCard({
   })
 
   const handleDownload = () => {
+    const downloadUrl = resultImageUrl
+    if (!downloadUrl) return
+
     const a = document.createElement("a")
-    a.href = job.outputUrl!
+    a.href = downloadUrl
     a.download = job.fileName
     a.click()
   }
@@ -479,7 +484,7 @@ function JobCard({
       <CardContent className="p-0">
         <div className="relative aspect-square overflow-hidden bg-muted">
           <Image
-            src={showResult ? job.outputUrl! : job.inputUrl}
+            src={showResult && resultImageUrl ? resultImageUrl : job.inputUrl}
             alt={job.fileName}
             fill
             sizes="(min-width: 1280px) 25vw, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"

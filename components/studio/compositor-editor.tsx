@@ -9,10 +9,7 @@ import {
   Transformer,
 } from "react-konva"
 import type Konva from "konva"
-import { useAction } from "convex/react"
 import { Loader2 } from "lucide-react"
-import { api } from "@/convex/_generated/api"
-import { Id } from "@/convex/_generated/dataModel"
 import type { BackgroundConfig } from "@/lib/background"
 import {
   clampFrameSize,
@@ -90,51 +87,22 @@ function ViewportDimOverlay({
 }
 
 interface CompositorEditorProps {
-  jobId: Id<"jobs">
   foregroundUrl: string
   background: BackgroundConfig
   initialLayout?: CompositionLayout
-  onDone: () => void
+  onDone: (layout: CompositionLayout) => Promise<void>
+  saving?: boolean
   className?: string
 }
 
-function useDebouncedCallback<T extends (...args: never[]) => void>(
-  callback: T,
-  delay: number
-) {
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const callbackRef = useRef(callback)
-
-  useEffect(() => {
-    callbackRef.current = callback
-  }, [callback])
-
-  useEffect(() => {
-    return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current)
-    }
-  }, [])
-
-  return useCallback(
-    (...args: Parameters<T>) => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current)
-      timeoutRef.current = setTimeout(() => {
-        callbackRef.current(...args)
-      }, delay)
-    },
-    [delay]
-  )
-}
-
 export function CompositorEditor({
-  jobId,
   foregroundUrl,
   background,
   initialLayout,
   onDone,
+  saving = false,
   className,
 }: CompositorEditorProps) {
-  const updateLayout = useAction(api.jobs.updateJobCompositionLayout)
   const containerRef = useRef<HTMLDivElement>(null)
   const transformerRef = useRef<Konva.Transformer>(null)
   const foregroundRef = useRef<Konva.Image>(null)
@@ -162,17 +130,8 @@ export function CompositorEditor({
   const [panOffset, setPanOffset] = useState<Point>({ x: 0, y: 0 })
   const [isSpacePressed, setIsSpacePressed] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const initialLayoutRef = useRef(initialLayout)
-
-  const persistLayout = useDebouncedCallback(
-    (nextLayout: CompositionLayout) => {
-      void updateLayout({
-        jobId,
-        compositionLayout: nextLayout,
-      })
-    },
-    500
-  )
 
   const backgroundIdentityKey =
     background.type === "solid" ? "solid" : `image:${background.imageUrl}`
@@ -424,12 +383,10 @@ export function CompositorEditor({
     (updater: (current: CompositionLayout) => CompositionLayout) => {
       setLayout((current) => {
         if (!current) return current
-        const next = updater(current)
-        persistLayout(next)
-        return next
+        return updater(current)
       })
     },
-    [persistLayout]
+    []
   )
 
   const handleReset = useCallback(async () => {
@@ -442,8 +399,20 @@ export function CompositorEditor({
     setLiveFrame(null)
     setLayout(defaultLayout)
     resetView()
-    persistLayout(defaultLayout)
-  }, [foregroundImage, backgroundImage, background, persistLayout, resetView])
+  }, [foregroundImage, backgroundImage, background, resetView])
+
+  const handleDone = useCallback(async () => {
+    if (!layout || isSaving || saving) return
+
+    setIsSaving(true)
+    try {
+      await onDone(layout)
+    } catch {
+      // Error surfaced via publish hook toast
+    } finally {
+      setIsSaving(false)
+    }
+  }, [isSaving, layout, onDone, saving])
 
   const handleFrameTransform = useCallback(() => {
     const node = frameRef.current
@@ -820,8 +789,20 @@ export function CompositorEditor({
           >
             Reset to default
           </Button>
-          <Button type="button" size="sm" onClick={onDone}>
-            Done
+          <Button
+            type="button"
+            size="sm"
+            disabled={isSaving || saving || !layout}
+            onClick={() => void handleDone()}
+          >
+            {isSaving || saving ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              "Done"
+            )}
           </Button>
         </div>
       </div>

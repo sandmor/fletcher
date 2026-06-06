@@ -10,11 +10,13 @@ import { internal } from "./_generated/api"
 import { paginationOptsValidator } from "convex/server"
 import {
   buildBackgroundKey,
+  buildCompositeKey,
   createPresignedPutUrl,
   deleteS3Object,
   deleteS3ObjectByUrl,
   getJobS3Keys,
   getPublicUrl,
+  isExpectedCompositeUrl,
 } from "./s3"
 
 export const createJob = mutation({
@@ -153,28 +155,33 @@ const compositionLayoutValidator = v.union(
   v.null()
 )
 
+const backgroundConfigValidator = v.union(
+  v.object({
+    type: v.literal("solid"),
+    color: v.string(),
+  }),
+  v.object({
+    type: v.literal("image"),
+    imageUrl: v.string(),
+    fileName: v.optional(v.string()),
+  })
+)
+
+const backgroundValidator = v.union(backgroundConfigValidator, v.null())
+
 export const patchJobBackground = internalMutation({
   args: {
     jobId: v.id("jobs"),
-    background: v.union(
-      v.object({
-        type: v.literal("solid"),
-        color: v.string(),
-      }),
-      v.object({
-        type: v.literal("image"),
-        imageUrl: v.string(),
-        fileName: v.optional(v.string()),
-      }),
-      v.null()
-    ),
+    background: backgroundValidator,
     clearCompositionLayout: v.optional(v.boolean()),
+    compositeUrl: v.optional(v.union(v.string(), v.null())),
   },
   handler: async (ctx, args) => {
     if (args.background === null) {
       await ctx.db.patch(args.jobId, {
         background: undefined,
         compositionLayout: undefined,
+        compositeUrl: undefined,
       })
       return
     }
@@ -182,10 +189,15 @@ export const patchJobBackground = internalMutation({
     const patch: {
       background: typeof args.background
       compositionLayout?: undefined
+      compositeUrl?: string
     } = { background: args.background }
 
     if (args.clearCompositionLayout) {
       patch.compositionLayout = undefined
+    }
+
+    if (args.compositeUrl) {
+      patch.compositeUrl = args.compositeUrl
     }
 
     await ctx.db.patch(args.jobId, patch)
@@ -196,15 +208,23 @@ export const patchJobCompositionLayout = internalMutation({
   args: {
     jobId: v.id("jobs"),
     compositionLayout: compositionLayoutValidator,
+    compositeUrl: v.string(),
+    background: backgroundConfigValidator,
   },
   handler: async (ctx, args) => {
     if (args.compositionLayout === null) {
-      await ctx.db.patch(args.jobId, { compositionLayout: undefined })
+      await ctx.db.patch(args.jobId, {
+        background: args.background,
+        compositionLayout: undefined,
+        compositeUrl: args.compositeUrl,
+      })
       return
     }
 
     await ctx.db.patch(args.jobId, {
+      background: args.background,
       compositionLayout: args.compositionLayout,
+      compositeUrl: args.compositeUrl,
     })
   },
 })
@@ -352,19 +372,6 @@ export const dismissFinishedFromQueue = mutation({
   },
 })
 
-const backgroundValidator = v.union(
-  v.object({
-    type: v.literal("solid"),
-    color: v.string(),
-  }),
-  v.object({
-    type: v.literal("image"),
-    imageUrl: v.string(),
-    fileName: v.optional(v.string()),
-  }),
-  v.null()
-)
-
 export const getBackgroundUploadUrl = action({
   args: {
     jobId: v.id("jobs"),
@@ -393,10 +400,37 @@ export const getBackgroundUploadUrl = action({
   },
 })
 
+export const getCompositeUploadUrl = action({
+  args: {
+    jobId: v.id("jobs"),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) {
+      throw new Error("Unauthorized")
+    }
+
+    await ctx.runQuery(internal.jobs.getJobForBackgroundUpdate, {
+      jobId: args.jobId,
+      clerkUserId: identity.subject,
+    })
+
+    const key = buildCompositeKey(args.jobId)
+    const uploadUrl = await createPresignedPutUrl(key, "image/png")
+
+    return {
+      uploadUrl,
+      compositeUrl: getPublicUrl(key),
+      key,
+    }
+  },
+})
+
 export const updateJobBackground = action({
   args: {
     jobId: v.id("jobs"),
     background: backgroundValidator,
+    compositeUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity()
@@ -419,6 +453,19 @@ export const updateJobBackground = action({
       }
     }
 
+    if (args.background === null && job.compositeUrl) {
+      await deleteS3ObjectByUrl(job.compositeUrl)
+    }
+
+    if (args.background !== null) {
+      if (!args.compositeUrl) {
+        throw new Error("compositeUrl is required when setting a background")
+      }
+      if (!isExpectedCompositeUrl(args.jobId, args.compositeUrl)) {
+        throw new Error("Invalid compositeUrl")
+      }
+    }
+
     const clearCompositionLayout =
       args.background === null ||
       (job.background?.type === "image" &&
@@ -431,14 +478,17 @@ export const updateJobBackground = action({
       jobId: args.jobId,
       background: args.background,
       clearCompositionLayout,
+      compositeUrl: args.background === null ? null : args.compositeUrl,
     })
   },
 })
 
-export const updateJobCompositionLayout = action({
+export const saveCompositionLayout = action({
   args: {
     jobId: v.id("jobs"),
     compositionLayout: compositionLayoutValidator,
+    compositeUrl: v.string(),
+    background: backgroundConfigValidator,
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity()
@@ -446,14 +496,24 @@ export const updateJobCompositionLayout = action({
       throw new Error("Unauthorized")
     }
 
-    await ctx.runQuery(internal.jobs.getJobForBackgroundUpdate, {
+    const job = await ctx.runQuery(internal.jobs.getJobForBackgroundUpdate, {
       jobId: args.jobId,
       clerkUserId: identity.subject,
     })
 
+    if (!job.background && !args.background) {
+      throw new Error("Cannot save composition without a background")
+    }
+
+    if (!isExpectedCompositeUrl(args.jobId, args.compositeUrl)) {
+      throw new Error("Invalid compositeUrl")
+    }
+
     await ctx.runMutation(internal.jobs.patchJobCompositionLayout, {
       jobId: args.jobId,
       compositionLayout: args.compositionLayout,
+      compositeUrl: args.compositeUrl,
+      background: args.background,
     })
   },
 })

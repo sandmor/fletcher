@@ -21,14 +21,22 @@ interface BackgroundPickerProps {
   jobId: Id<"jobs">
   value?: BackgroundConfig
   onSolidChange: (background: { type: "solid"; color: string }) => void
+  onImageUploaded: (background: {
+    type: "image"
+    imageUrl: string
+    fileName: string
+  }) => void | Promise<void>
   onClear: () => void
+  disabled?: boolean
 }
 
 export function BackgroundPicker({
   jobId,
   value,
   onSolidChange,
+  onImageUploaded,
   onClear,
+  disabled = false,
 }: BackgroundPickerProps) {
   const [mode, setMode] = useState<BackgroundMode>(
     value?.type === "image" ? "image" : "color"
@@ -44,17 +52,18 @@ export function BackgroundPicker({
     async (files: File[]) => {
       const file = files[0]
       if (!file) return
-      await uploadBackgroundImage(file)
+      const { imageUrl, fileName } = await uploadBackgroundImage(file)
       setMode("image")
+      await onImageUploaded({ type: "image", imageUrl, fileName })
     },
-    [uploadBackgroundImage]
+    [onImageUploaded, uploadBackgroundImage]
   )
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop: (files) => void handleImageUpload(files),
     accept: { "image/*": [] },
     multiple: false,
-    disabled: uploading,
+    disabled: uploading || disabled,
     noClick: true,
     noKeyboard: true,
   })
@@ -94,8 +103,9 @@ export function BackgroundPicker({
                     title={preset.label}
                     aria-label={preset.label}
                     onClick={() =>
-                      onSolidChange({ type: "solid", color: preset.value })
+                      !disabled && onSolidChange({ type: "solid", color: preset.value })
                     }
+                    disabled={disabled}
                     className={cn(
                       "aspect-square rounded-full border-2 transition-transform hover:scale-105",
                       isActive
@@ -122,9 +132,11 @@ export function BackgroundPicker({
                 type="color"
                 value={customColor}
                 onChange={(event) => {
+                  if (disabled) return
                   const color = normalizeHexColor(event.target.value)
                   onSolidChange({ type: "solid", color })
                 }}
+                disabled={disabled}
                 className="h-10 w-14 cursor-pointer rounded-md border border-border bg-transparent p-1"
               />
               <span className="font-mono text-sm text-muted-foreground">
@@ -197,7 +209,7 @@ export function BackgroundPicker({
               type="button"
               variant="outline"
               size="sm"
-              disabled={uploading}
+              disabled={uploading || disabled}
               onClick={() => fileInputRef.current?.click()}
             >
               {value?.type === "image" ? "Replace image" : "Choose image"}
@@ -211,7 +223,12 @@ export function BackgroundPicker({
       )}
 
       {value && (
-        <Button variant="outline" onClick={onClear} className="w-full">
+        <Button
+          variant="outline"
+          onClick={onClear}
+          disabled={disabled}
+          className="w-full"
+        >
           Remove background
         </Button>
       )}

@@ -66,6 +66,11 @@ export function getJobS3Keys(job: Doc<"jobs">): string[] {
     if (backgroundKey) keys.push(backgroundKey)
   }
 
+  if (job.compositeUrl) {
+    const compositeKey = getS3KeyFromUrl(job.compositeUrl)
+    if (compositeKey) keys.push(compositeKey)
+  }
+
   return keys
 }
 
@@ -82,6 +87,18 @@ export function sanitizeFileName(fileName: string): string {
 
 export function buildBackgroundKey(jobId: string, fileName: string): string {
   return `backgrounds/${jobId}/${Date.now()}-${sanitizeFileName(fileName)}`
+}
+
+export function buildCompositeKey(jobId: string): string {
+  return `composites/${jobId}.png`
+}
+
+export function getExpectedCompositeUrl(jobId: string): string {
+  return getPublicUrl(buildCompositeKey(jobId))
+}
+
+export function isExpectedCompositeUrl(jobId: string, url: string): boolean {
+  return url === getExpectedCompositeUrl(jobId)
 }
 
 export async function createPresignedPutUrl(

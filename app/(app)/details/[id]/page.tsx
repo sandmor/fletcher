@@ -19,6 +19,7 @@ import {
   Image as ImageIcon,
   AlertCircle,
 } from "lucide-react"
+import { getResultImageUrl } from "@/lib/job-result-image"
 import {
   compositeImageFromUrl,
   downloadBlob,
@@ -37,9 +38,13 @@ export default function DetailPage() {
   const handleDownload = async () => {
     if (!job?.outputUrl) return
 
-    if (!job.background) {
+    const resultImageUrl = getResultImageUrl(job)
+
+    if (job.compositeUrl || !job.background) {
+      if (!resultImageUrl) return
+
       const anchor = document.createElement("a")
-      anchor.href = job.outputUrl
+      anchor.href = resultImageUrl
       anchor.download = job.fileName
       anchor.click()
       return

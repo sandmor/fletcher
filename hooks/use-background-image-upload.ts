@@ -8,7 +8,6 @@ import { uploadToS3 } from "@/lib/s3"
 
 export function useBackgroundImageUpload(jobId: Id<"jobs">) {
   const getBackgroundUploadUrl = useAction(api.jobs.getBackgroundUploadUrl)
-  const updateJobBackground = useAction(api.jobs.updateJobBackground)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -26,15 +25,6 @@ export function useBackgroundImageUpload(jobId: Id<"jobs">) {
 
         await uploadToS3(uploadUrl, file)
 
-        await updateJobBackground({
-          jobId,
-          background: {
-            type: "image",
-            imageUrl,
-            fileName: file.name,
-          },
-        })
-
         return { imageUrl, fileName: file.name }
       } catch (err) {
         const message =
@@ -45,7 +35,7 @@ export function useBackgroundImageUpload(jobId: Id<"jobs">) {
         setUploading(false)
       }
     },
-    [getBackgroundUploadUrl, jobId, updateJobBackground]
+    [getBackgroundUploadUrl, jobId]
   )
 
   return { uploadBackgroundImage, uploading, error }

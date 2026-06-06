@@ -1,17 +1,18 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import Image from "next/image"
-import { useAction } from "convex/react"
 import { ChevronsLeftRight } from "lucide-react"
-import { api } from "@/convex/_generated/api"
 import { Doc, Id } from "@/convex/_generated/dataModel"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { CompositorPreview } from "@/components/studio/compositor-canvas"
 import { BackgroundPicker } from "@/components/studio/background-picker"
 import { TransparencyBackground } from "@/components/studio/transparency-background"
+import { usePublishStudioResult } from "@/hooks/use-publish-studio-result"
+import type { BackgroundConfig } from "@/lib/background"
+import type { CompositionLayout } from "@/lib/composition-layout"
 import { cn } from "@/lib/utils"
 
 const CompositorEditor = dynamic(
@@ -39,27 +40,66 @@ export function StudioViewer({ job }: StudioViewerProps) {
   const [activeTab, setActiveTab] = useState<StudioTab>("edit")
   const [sliderPos, setSliderPos] = useState(50)
   const [advancedLayout, setAdvancedLayout] = useState(false)
-  const updateBackground = useAction(api.jobs.updateJobBackground)
+  const [previewBackground, setPreviewBackground] = useState<
+    BackgroundConfig | undefined
+  >()
+  const {
+    publishing,
+    publishSolidBackground,
+    publishBackgroundImage,
+    publishBackgroundClear,
+    publishCompositionLayout,
+  } = usePublishStudioResult(job._id as Id<"jobs">, job.outputUrl, {
+    onFailure: () => setPreviewBackground(undefined),
+  })
+
+  useEffect(() => {
+    setPreviewBackground(undefined)
+  }, [job.background])
+
+  const activeBackground = previewBackground ?? job.background
 
   const handleSolidChange = useCallback(
     (background: { type: "solid"; color: string }) => {
-      void updateBackground({
-        jobId: job._id as Id<"jobs">,
-        background,
-      })
+      setPreviewBackground(background)
+      publishSolidBackground(background.color, job.compositionLayout)
     },
-    [job._id, updateBackground]
+    [job.compositionLayout, publishSolidBackground]
   )
 
-  const handleBackgroundClear = useCallback(() => {
-    setAdvancedLayout(false)
-    void updateBackground({
-      jobId: job._id as Id<"jobs">,
-      background: null,
-    })
-  }, [job._id, updateBackground])
+  const handleImageUploaded = useCallback(
+    async (background: {
+      type: "image"
+      imageUrl: string
+      fileName: string
+    }) => {
+      setPreviewBackground(background)
+      try {
+        await publishBackgroundImage(background)
+      } catch {
+        setPreviewBackground(undefined)
+      }
+    },
+    [publishBackgroundImage]
+  )
 
-  const showAdvancedEntry = Boolean(job.background) && !advancedLayout
+  const handleBackgroundClear = useCallback(async () => {
+    setAdvancedLayout(false)
+    setPreviewBackground(undefined)
+    await publishBackgroundClear()
+  }, [publishBackgroundClear])
+
+  const handleCompositionDone = useCallback(
+    async (layout: CompositionLayout) => {
+      if (!activeBackground) return
+
+      await publishCompositionLayout(layout, activeBackground)
+      setAdvancedLayout(false)
+    },
+    [activeBackground, publishCompositionLayout]
+  )
+
+  const showAdvancedEntry = Boolean(activeBackground) && !advancedLayout
 
   return (
     <div className="flex flex-col gap-6">
@@ -101,13 +141,13 @@ export function StudioViewer({ job }: StudioViewerProps) {
                   : "aspect-4/3 sm:aspect-video"
               )}
             >
-              {activeTab === "edit" && advancedLayout && job.background && (
+              {activeTab === "edit" && advancedLayout && activeBackground && (
                 <CompositorEditor
-                  jobId={job._id}
                   foregroundUrl={job.outputUrl}
-                  background={job.background}
+                  background={activeBackground}
                   initialLayout={job.compositionLayout}
-                  onDone={() => setAdvancedLayout(false)}
+                  onDone={handleCompositionDone}
+                  saving={publishing}
                   className="animate-fade-in h-full w-full"
                 />
               )}
@@ -115,7 +155,7 @@ export function StudioViewer({ job }: StudioViewerProps) {
               {activeTab === "edit" && !advancedLayout && (
                 <CompositorPreview
                   foregroundUrl={job.outputUrl}
-                  background={job.background}
+                  background={activeBackground}
                   layout={job.compositionLayout}
                   className="animate-fade-in h-full w-full"
                 />
@@ -185,6 +225,7 @@ export function StudioViewer({ job }: StudioViewerProps) {
                   variant="ghost"
                   size="sm"
                   className="text-muted-foreground"
+                  disabled={publishing}
                   onClick={() => setAdvancedLayout(true)}
                 >
                   Adjust positioning
@@ -202,9 +243,11 @@ export function StudioViewer({ job }: StudioViewerProps) {
               </h2>
               <BackgroundPicker
                 jobId={job._id}
-                value={job.background}
+                value={activeBackground}
                 onSolidChange={handleSolidChange}
-                onClear={handleBackgroundClear}
+                onImageUploaded={handleImageUploaded}
+                onClear={() => void handleBackgroundClear()}
+                disabled={publishing || advancedLayout}
               />
             </CardContent>
           </Card>
