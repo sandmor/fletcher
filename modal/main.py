@@ -12,7 +12,7 @@ def download_model():
     This replaces the old @modal.build() class method.
     """
     import rembg
-    rembg.new_session("birefnet-massive")
+    rembg.new_session("bria-rmbg")
 
 model_volume = modal.Volume.from_name("rembg-models", create_if_missing=True)
 
@@ -69,7 +69,7 @@ def _send_callback(
 
     logger.error(f"Callback failed after {max_retries} attempts. Last error: {last_error}")
 
-@app.cls(gpu="L4", scaledown_window=300, max_containers=1, image=gpu_image, volumes={VOLUME_PATH: model_volume}, enable_memory_snapshot=True)
+@app.cls(gpu="T4", scaledown_window=10, max_containers=1, image=gpu_image, volumes={VOLUME_PATH: model_volume}, enable_memory_snapshot=True)
 class BiRefNetProcessor:
     @modal.enter(snap=True)
     def pre_warm_imports(self):
@@ -85,7 +85,7 @@ class BiRefNetProcessor:
         import rembg
         
         logger.info(f"Runtime Phase: Loading BiRefNet from {VOLUME_PATH}...")
-        self.session = rembg.new_session("birefnet-massive")
+        self.session = rembg.new_session("bria-rmbg")
         logger.info("Model loaded successfully.")
 
     @modal.method()
@@ -139,7 +139,6 @@ class BiRefNetProcessor:
                 callback_secret,
             )
 
-# 3. The trigger endpoint
 @app.function()
 @modal.fastapi_endpoint(method="POST")
 def trigger_job(data: dict):
