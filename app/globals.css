@@ -45,6 +45,7 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  --color-canvas-backdrop: var(--canvas-backdrop);
 }
 
 :root {
@@ -80,6 +81,15 @@
   --sidebar-accent-foreground: oklch(0.16 0.01 285);
   --sidebar-border: oklch(0 0 0 / 8%);
   --sidebar-ring: oklch(0.58 0.17 55 / 50%);
+
+  /* Layout + editor chrome */
+  --container-content: 80rem;
+  --editor-panel-w: 20rem;
+  --editor-toolbar-h: 3.5rem;
+  --mobile-nav-h: 3.75rem;
+  /* Neutral workspace backdrop — intentionally dark in both themes so
+     transparent / light images read with high contrast in the editor. */
+  --canvas-backdrop: oklch(0.21 0.005 285);
 }
 
 .dark {
@@ -114,6 +124,8 @@
   --sidebar-accent-foreground: oklch(0.95 0.005 85);
   --sidebar-border: oklch(1 0 0 / 8%);
   --sidebar-ring: oklch(0.75 0.16 70 / 50%);
+
+  --canvas-backdrop: oklch(0.16 0.004 285);
 }
 
 @layer base {
@@ -155,13 +167,69 @@
     background-position: 200% 0;
   }
 }
+@keyframes editor-in {
+  from {
+    opacity: 0;
+    transform: scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes editor-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.99);
+  }
+}
 
 @layer utilities {
+  /* Centered content container for browse surfaces (Upload, Results,
+     Details chrome). Editor surfaces deliberately opt out and go full-bleed. */
+  .app-container {
+    width: 100%;
+    max-width: var(--container-content);
+    margin-inline: auto;
+    padding-inline: 1rem;
+  }
+  @media (min-width: 640px) {
+    .app-container {
+      padding-inline: 1.5rem;
+    }
+  }
+  @media (min-width: 1024px) {
+    .app-container {
+      padding-inline: 2rem;
+    }
+  }
+
+  .canvas-backdrop {
+    background-color: var(--canvas-backdrop);
+    background-image:
+      radial-gradient(
+        circle at 1px 1px,
+        oklch(1 0 0 / 5%) 1px,
+        transparent 0
+      );
+    background-size: 22px 22px;
+  }
+
   .animate-fade-in {
     animation: fade-in 0.4s ease-out both;
   }
   .animate-slide-up {
     animation: slide-up 0.35s ease-out both;
+  }
+  .animate-editor-in {
+    animation: editor-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .animate-editor-out {
+    animation: editor-out 0.2s cubic-bezier(0.4, 0, 1, 1) both;
   }
   .animate-shimmer {
     background: linear-gradient(

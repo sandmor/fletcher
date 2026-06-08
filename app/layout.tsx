@@ -1,5 +1,5 @@
 import { Outfit } from "next/font/google"
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 
 import "./globals.css"
 import { ThemeProvider, ThemeHotkey } from "@/components/theme-provider"
@@ -13,6 +13,12 @@ export const metadata: Metadata = {
   title: "Fletcher — Background Removal",
   description:
     "Remove backgrounds from your images automatically. Upload, process, and download — all in seconds.",
+}
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 }
 
 export default function RootLayout({

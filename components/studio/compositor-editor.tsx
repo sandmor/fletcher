@@ -1,6 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 import {
   Stage,
   Layer,
@@ -9,7 +15,16 @@ import {
   Transformer,
 } from "react-konva"
 import type Konva from "konva"
-import { Loader2 } from "lucide-react"
+import {
+  Hand,
+  Layers,
+  Loader2,
+  Maximize,
+  MousePointer2,
+  RotateCcw,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react"
 import type { BackgroundConfig } from "@/lib/background"
 import {
   clampFrameSize,
@@ -37,15 +52,33 @@ import {
   loadForegroundImage,
 } from "@/lib/image-compositor"
 import { Button } from "@/components/ui/button"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Drawer,
+  DrawerContent,
+  DrawerTitle,
+} from "@/components/ui/drawer"
 import { cn } from "@/lib/utils"
 
 type SelectableLayer = "foreground" | "background" | "frame"
 
 const FRAME_STROKE = "#3b82f6"
+const TOUCH_ANCHOR_SIZE = 14
+const POINTER_ANCHOR_SIZE = 8
 
 type FrameBounds = LayerRect
 
 const DIM_COLOR = "rgba(0, 0, 0, 0.45)"
+
+const LAYER_OPTIONS = [
+  ["foreground", "Foreground"],
+  ["background", "Background"],
+  ["frame", "Frame"],
+] as const
+
+function touchDistance(a: Touch, b: Touch) {
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+}
 
 function ViewportDimOverlay({
   stageSize,
@@ -93,6 +126,8 @@ interface CompositorEditorProps {
   onDone: (layout: CompositionLayout) => Promise<void>
   saving?: boolean
   className?: string
+  /** Optional panel (e.g. the background picker) embedded into the side rail / mobile sheet. */
+  backgroundPanel?: ReactNode
 }
 
 export function CompositorEditor({
@@ -102,17 +137,18 @@ export function CompositorEditor({
   onDone,
   saving = false,
   className,
+  backgroundPanel,
 }: CompositorEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const stageRef = useRef<Konva.Stage>(null)
   const transformerRef = useRef<Konva.Transformer>(null)
+  const cameraAnimRef = useRef<number | null>(null)
   const foregroundRef = useRef<Konva.Image>(null)
   const backgroundRef = useRef<Konva.Image | Konva.Rect>(null)
   const frameRef = useRef<Konva.Rect>(null)
   const frameTransformRafRef = useRef<number | null>(null)
   const liveFrameRef = useRef<FrameBounds | null>(null)
-  const isSpacePressedRef = useRef(false)
-  const isPanningRef = useRef(false)
-  const lastPanPointerRef = useRef<Point | null>(null)
+  const pinchRef = useRef<{ distance: number; midpoint: Point } | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -130,7 +166,14 @@ export function CompositorEditor({
   const [panOffset, setPanOffset] = useState<Point>({ x: 0, y: 0 })
   const [isSpacePressed, setIsSpacePressed] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
+  const [panMode, setPanMode] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [mobilePanelOpen, setMobilePanelOpen] = useState(false)
+  const [coarsePointer, setCoarsePointer] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(pointer: coarse)").matches
+  )
   const initialLayoutRef = useRef(initialLayout)
 
   const backgroundIdentityKey =
@@ -214,9 +257,19 @@ export function CompositorEditor({
   }, [liveFrame])
 
   useEffect(() => {
+    const query = window.matchMedia("(pointer: coarse)")
+    const update = () => setCoarsePointer(query.matches)
+    query.addEventListener("change", update)
+    return () => query.removeEventListener("change", update)
+  }, [])
+
+  useEffect(() => {
     return () => {
       if (frameTransformRafRef.current !== null) {
         cancelAnimationFrame(frameTransformRafRef.current)
+      }
+      if (cameraAnimRef.current !== null) {
+        cancelAnimationFrame(cameraAnimRef.current)
       }
     }
   }, [])
@@ -238,26 +291,27 @@ export function CompositorEditor({
     }
   }, [selectedLayer, layout, foregroundImage, backgroundImage])
 
-  useEffect(() => {
-    isSpacePressedRef.current = isSpacePressed
-  }, [isSpacePressed])
+  const syncStagePan = useCallback(() => {
+    const stage = stageRef.current
+    if (!stage || !layout) return
 
-  useEffect(() => {
-    isPanningRef.current = isPanning
-  }, [isPanning])
+    const workspace = getWorkspaceSize(layout)
+    const center = getFitCenterOffset(
+      stageSize.width,
+      stageSize.height,
+      workspace.width,
+      workspace.height,
+      fitScale
+    )
+    setPanOffset({
+      x: stage.x() - center.x,
+      y: stage.y() - center.y,
+    })
+  }, [layout, stageSize, fitScale])
 
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container || !layout) return
-
-    const handleWheel = (event: WheelEvent) => {
-      event.preventDefault()
-
-      const rect = container.getBoundingClientRect()
-      const pointer = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      }
+  const zoomAroundPointer = useCallback(
+    (pointer: Point, scaleFactor: number) => {
+      if (!layout) return
       const workspace = getWorkspaceSize(layout)
       const center = getFitCenterOffset(
         stageSize.width,
@@ -266,7 +320,6 @@ export function CompositorEditor({
         workspace.height,
         fitScale
       )
-      const scaleFactor = Math.exp(-event.deltaY * 0.002)
       const oldScale = fitScale * userZoom
       const oldPosition = {
         x: center.x + panOffset.x,
@@ -286,11 +339,91 @@ export function CompositorEditor({
         x: position.x - center.x,
         y: position.y - center.y,
       })
+    },
+    [layout, fitScale, userZoom, panOffset, stageSize]
+  )
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container || !layout) return
+
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault()
+
+      const rect = container.getBoundingClientRect()
+      const pointer = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      }
+      zoomAroundPointer(pointer, Math.exp(-event.deltaY * 0.002))
     }
 
     container.addEventListener("wheel", handleWheel, { passive: false })
     return () => container.removeEventListener("wheel", handleWheel)
-  }, [layout, fitScale, userZoom, panOffset, stageSize])
+  }, [layout, zoomAroundPointer])
+
+  // Touch: pinch-to-zoom (two fingers). One-finger pan is handled by Konva Stage drag.
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container || !layout) return
+
+    const handleTouchStart = (event: TouchEvent) => {
+      if (event.touches.length === 2) {
+        stageRef.current?.stopDrag()
+        const [a, b] = [event.touches[0], event.touches[1]]
+        const midpointClient = {
+          x: (a.clientX + b.clientX) / 2,
+          y: (a.clientY + b.clientY) / 2,
+        }
+        const rect = container.getBoundingClientRect()
+        pinchRef.current = {
+          distance: touchDistance(a, b),
+          midpoint: {
+            x: midpointClient.x - rect.left,
+            y: midpointClient.y - rect.top,
+          },
+        }
+        event.preventDefault()
+      }
+    }
+
+    const handleTouchMove = (event: TouchEvent) => {
+      if (pinchRef.current && event.touches.length === 2) {
+        event.preventDefault()
+        const [a, b] = [event.touches[0], event.touches[1]]
+        const distance = touchDistance(a, b)
+        const factor = distance / pinchRef.current.distance
+        if (factor && Number.isFinite(factor)) {
+          zoomAroundPointer(pinchRef.current.midpoint, factor)
+        }
+        const rect = container.getBoundingClientRect()
+        pinchRef.current = {
+          distance,
+          midpoint: {
+            x: (a.clientX + b.clientX) / 2 - rect.left,
+            y: (a.clientY + b.clientY) / 2 - rect.top,
+          },
+        }
+      }
+    }
+
+    const handleTouchEnd = (event: TouchEvent) => {
+      if (event.touches.length < 2) pinchRef.current = null
+    }
+
+    container.addEventListener("touchstart", handleTouchStart, {
+      passive: false,
+    })
+    container.addEventListener("touchmove", handleTouchMove, { passive: false })
+    container.addEventListener("touchend", handleTouchEnd)
+    container.addEventListener("touchcancel", handleTouchEnd)
+    return () => {
+      container.removeEventListener("touchstart", handleTouchStart)
+      container.removeEventListener("touchmove", handleTouchMove)
+      container.removeEventListener("touchend", handleTouchEnd)
+      container.removeEventListener("touchcancel", handleTouchEnd)
+    }
+  }, [layout, zoomAroundPointer])
 
   useEffect(() => {
     const isEditableTarget = (target: EventTarget | null) => {
@@ -313,11 +446,8 @@ export function CompositorEditor({
     const handleKeyUp = (event: KeyboardEvent) => {
       if (event.code !== "Space") return
       setIsSpacePressed(false)
-      if (isPanningRef.current) {
-        isPanningRef.current = false
-        setIsPanning(false)
-        lastPanPointerRef.current = null
-      }
+      stageRef.current?.stopDrag()
+      setIsPanning(false)
     }
 
     window.addEventListener("keydown", handleKeyDown)
@@ -328,56 +458,79 @@ export function CompositorEditor({
     }
   }, [])
 
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
+  const animateCameraTo = useCallback(
+    (target: { userZoom: number; panOffset: Point }, durationMs = 180) => {
+      if (cameraAnimRef.current !== null) {
+        cancelAnimationFrame(cameraAnimRef.current)
+      }
 
-    const endPan = () => {
-      if (!isPanningRef.current) return
-      isPanningRef.current = false
-      setIsPanning(false)
-      lastPanPointerRef.current = null
-    }
+      const startZoom = userZoom
+      const startPan = panOffset
+      const startTime = performance.now()
 
-    const handleMouseDown = (event: MouseEvent) => {
-      const spacePan = isSpacePressedRef.current && event.button === 0
-      const middlePan = event.button === 1
-      if (!spacePan && !middlePan) return
+      const tick = (now: number) => {
+        const t = Math.min(1, (now - startTime) / durationMs)
+        const eased = 1 - (1 - t) ** 3
 
-      event.preventDefault()
-      isPanningRef.current = true
-      setIsPanning(true)
-      lastPanPointerRef.current = { x: event.clientX, y: event.clientY }
-    }
+        setUserZoom(startZoom + (target.userZoom - startZoom) * eased)
+        setPanOffset({
+          x: startPan.x + (target.panOffset.x - startPan.x) * eased,
+          y: startPan.y + (target.panOffset.y - startPan.y) * eased,
+        })
 
-    const handleMouseMove = (event: MouseEvent) => {
-      if (!isPanningRef.current || !lastPanPointerRef.current) return
+        if (t < 1) {
+          cameraAnimRef.current = requestAnimationFrame(tick)
+        } else {
+          cameraAnimRef.current = null
+        }
+      }
 
-      event.preventDefault()
-      const deltaX = event.clientX - lastPanPointerRef.current.x
-      const deltaY = event.clientY - lastPanPointerRef.current.y
-      lastPanPointerRef.current = { x: event.clientX, y: event.clientY }
-
-      setPanOffset((current) => ({
-        x: current.x + deltaX,
-        y: current.y + deltaY,
-      }))
-    }
-
-    container.addEventListener("mousedown", handleMouseDown)
-    window.addEventListener("mousemove", handleMouseMove)
-    window.addEventListener("mouseup", endPan)
-    return () => {
-      container.removeEventListener("mousedown", handleMouseDown)
-      window.removeEventListener("mousemove", handleMouseMove)
-      window.removeEventListener("mouseup", endPan)
-    }
-  }, [])
+      cameraAnimRef.current = requestAnimationFrame(tick)
+    },
+    [userZoom, panOffset]
+  )
 
   const resetView = useCallback(() => {
-    setUserZoom(1)
-    setPanOffset({ x: 0, y: 0 })
-  }, [])
+    animateCameraTo({ userZoom: 1, panOffset: { x: 0, y: 0 } })
+  }, [animateCameraTo])
+
+  const zoomByButton = useCallback(
+    (factor: number) => {
+      if (!layout) return
+
+      const workspace = getWorkspaceSize(layout)
+      const center = getFitCenterOffset(
+        stageSize.width,
+        stageSize.height,
+        workspace.width,
+        workspace.height,
+        fitScale
+      )
+      const pointer = { x: stageSize.width / 2, y: stageSize.height / 2 }
+      const oldScale = fitScale * userZoom
+      const oldPosition = {
+        x: center.x + panOffset.x,
+        y: center.y + panOffset.y,
+      }
+      const { scale, position } = zoomAtPointer(
+        oldScale,
+        oldPosition,
+        pointer,
+        factor,
+        fitScale * MIN_USER_ZOOM,
+        fitScale * MAX_USER_ZOOM
+      )
+
+      animateCameraTo({
+        userZoom: clampUserZoom(scale / fitScale),
+        panOffset: {
+          x: position.x - center.x,
+          y: position.y - center.y,
+        },
+      })
+    },
+    [layout, fitScale, userZoom, panOffset, stageSize, animateCameraTo]
+  )
 
   const updateLayoutState = useCallback(
     (updater: (current: CompositionLayout) => CompositionLayout) => {
@@ -564,6 +717,81 @@ export function CompositorEditor({
     [layout, updateLayoutState]
   )
 
+  const zoomPercent = Math.round(userZoom * 100)
+  const saveBusy = isSaving || saving
+
+  // ── Shared control groups, reused by the desktop rail and the mobile sheet ──
+  const layerSelector = (
+    <div className="flex flex-col gap-2">
+      <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+        Layer
+      </p>
+      <div className="grid grid-cols-3 gap-1.5">
+        {LAYER_OPTIONS.map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => selectLayer(id)}
+            className={cn(
+              "border px-2 py-2 text-xs font-medium transition-colors",
+              selectedLayer === id
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border bg-muted/40 text-muted-foreground hover:text-foreground"
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+
+  const actionButtons = (
+    <div className="flex flex-col gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="w-full"
+        onClick={() => void handleReset()}
+      >
+        <RotateCcw />
+        Reset to default
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        className="w-full"
+        disabled={saveBusy || !layout}
+        onClick={() => void handleDone()}
+      >
+        {saveBusy ? (
+          <>
+            <Loader2 className="animate-spin" />
+            Saving...
+          </>
+        ) : (
+          "Done"
+        )}
+      </Button>
+    </div>
+  )
+
+  const panelContent = (
+    <div className="flex flex-col gap-6">
+      {layerSelector}
+      {backgroundPanel && (
+        <div className="flex flex-col gap-3">
+          <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+            Background
+          </p>
+          {backgroundPanel}
+        </div>
+      )}
+      {actionButtons}
+    </div>
+  )
+
   if (error) {
     return (
       <div
@@ -581,7 +809,7 @@ export function CompositorEditor({
     return (
       <div
         className={cn(
-          "flex h-full w-full items-center justify-center",
+          "flex h-full w-full items-center justify-center canvas-backdrop",
           className
         )}
       >
@@ -611,31 +839,45 @@ export function CompositorEditor({
     userZoom,
     panOffset
   )
-  const layersDraggable = !isSpacePressed && !isPanning
+  const layersDraggable = !isSpacePressed && !isPanning && !panMode
   const backgroundListening =
     selectedLayer === "background" && layersDraggable
   const foregroundListening =
     selectedLayer === "foreground" && layersDraggable
   const frameListening = selectedLayer === "frame"
+  const anchorSize = coarsePointer ? TOUCH_ANCHOR_SIZE : POINTER_ANCHOR_SIZE
 
   return (
-    <div className={cn("flex h-full w-full flex-col gap-3", className)}>
+    <div
+      className={cn(
+        "flex h-full w-full flex-col md:flex-row md:items-stretch",
+        className
+      )}
+    >
       <div
         ref={containerRef}
         className={cn(
-          "relative min-h-0 flex-1 overflow-hidden rounded-lg bg-muted/20",
-          isSpacePressed && !isPanning && "cursor-grab",
+          "canvas-backdrop relative min-h-0 flex-1 touch-none overflow-hidden",
+          (isSpacePressed || panMode) && !isPanning && "cursor-grab",
           isPanning && "cursor-grabbing",
-          isSpacePressed && "select-none"
+          (isSpacePressed || panMode) && "select-none"
         )}
       >
         <Stage
+          ref={stageRef}
           width={stageSize.width}
           height={stageSize.height}
           scaleX={stageTransform.scale}
           scaleY={stageTransform.scale}
           x={stageTransform.x}
           y={stageTransform.y}
+          draggable={panMode || isSpacePressed}
+          onDragStart={() => setIsPanning(true)}
+          onDragMove={syncStagePan}
+          onDragEnd={() => {
+            syncStagePan()
+            setIsPanning(false)
+          }}
         >
           <Layer>
             {backgroundStage &&
@@ -717,7 +959,8 @@ export function CompositorEditor({
               borderEnabled={selectedLayer !== "frame"}
               anchorFill="#3b82f6"
               anchorStroke="#ffffff"
-              anchorSize={8}
+              anchorSize={anchorSize}
+              anchorCornerRadius={2}
               enabledAnchors={
                 selectedLayer === "frame"
                   ? [
@@ -745,73 +988,90 @@ export function CompositorEditor({
             />
           </Layer>
         </Stage>
-      </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
-        <div className="flex flex-wrap gap-2">
-          {(
-            [
-              ["foreground", "Foreground"],
-              ["background", "Background"],
-              ["frame", "Frame"],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
+        {/* Floating zoom + tool controls, anchored to the canvas */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 p-3 sm:p-4">
+          <div className="pointer-events-auto flex items-center gap-1 border border-border/60 bg-background/80 p-1 shadow-lg backdrop-blur-md">
+            <Button
               type="button"
-              onClick={() => selectLayer(id)}
-              className={cn(
-                "rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                selectedLayer === id
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:text-foreground"
-              )}
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Zoom out"
+              onClick={() => zoomByButton(0.8)}
             >
-              {label}
-            </button>
-          ))}
-        </div>
+              <ZoomOut />
+            </Button>
+            <span className="min-w-12 text-center text-xs font-medium tabular-nums text-muted-foreground">
+              {zoomPercent}%
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Zoom in"
+              onClick={() => zoomByButton(1.2)}
+            >
+              <ZoomIn />
+            </Button>
+            <div className="mx-0.5 h-5 w-px bg-border" />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Fit to screen"
+              onClick={resetView}
+            >
+              <Maximize />
+            </Button>
+            <Button
+              type="button"
+              variant={panMode ? "secondary" : "ghost"}
+              size="icon-sm"
+              aria-label={panMode ? "Switch to select tool" : "Switch to pan tool"}
+              aria-pressed={panMode}
+              onClick={() => setPanMode((value) => !value)}
+            >
+              {panMode ? <Hand /> : <MousePointer2 />}
+            </Button>
+          </div>
 
-        <div className="flex gap-2">
+          {/* Mobile-only: open the options sheet */}
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
-            onClick={resetView}
+            className="pointer-events-auto shadow-lg md:hidden"
+            onClick={() => setMobilePanelOpen(true)}
           >
-            Reset view
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => void handleReset()}
-          >
-            Reset to default
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            disabled={isSaving || saving || !layout}
-            onClick={() => void handleDone()}
-          >
-            {isSaving || saving ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              "Done"
-            )}
+            <Layers />
+            Options
           </Button>
         </div>
       </div>
 
-      <p className="px-1 text-xs text-muted-foreground">
-        Drag layers to reposition. Scroll to zoom; hold Space or use the
-        middle mouse button to pan. Content outside the frame will not appear
-        in the final image.
-      </p>
+      {/* Desktop side rail */}
+      <aside
+        className="hidden w-(--editor-panel-w) shrink-0 flex-col border-l border-border bg-card md:flex"
+      >
+        <ScrollArea className="flex-1">
+          <div className="p-5">{panelContent}</div>
+        </ScrollArea>
+      </aside>
+
+      {/* Mobile options sheet */}
+      <Drawer open={mobilePanelOpen} onOpenChange={setMobilePanelOpen}>
+        <DrawerContent className="md:hidden">
+          <DrawerTitle className="px-5 pt-2">Composition</DrawerTitle>
+          <ScrollArea className="max-h-[65vh]">
+            <div
+              className="p-5"
+              style={{ paddingBottom: "calc(1.25rem + env(safe-area-inset-bottom))" }}
+            >
+              {panelContent}
+            </div>
+          </ScrollArea>
+        </DrawerContent>
+      </Drawer>
     </div>
   )
 }

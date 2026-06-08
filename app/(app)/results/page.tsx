@@ -165,8 +165,8 @@ export default function ResultsPage() {
     <>
       <main
         className={cn(
-          "mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8",
-          selectionMode && "pb-24 sm:pb-10"
+          "app-container py-6",
+          selectionMode && "pb-48 sm:pb-10"
         )}
       >
         <div className="flex flex-col gap-6">
@@ -292,7 +292,12 @@ export default function ResultsPage() {
       </main>
 
       {selectionMode && (
-        <div className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-popover sm:hidden">
+        <div
+          className="fixed inset-x-0 z-40 border-t border-border bg-popover sm:hidden"
+          style={{
+            bottom: "calc(var(--mobile-nav-h) + env(safe-area-inset-bottom))",
+          }}
+        >
           <div className="mx-auto max-w-6xl px-4 py-4">
             <p className="mb-3 text-center text-sm font-semibold">
               {selectedCount} selected
@@ -317,7 +322,7 @@ export default function ResultsPage() {
                 Select all
               </Label>
             </div>
-            <div className="flex gap-2 pb-[env(safe-area-inset-bottom)]">
+            <div className="flex gap-2">
               <Button
                 variant="outline"
                 className="flex-1"

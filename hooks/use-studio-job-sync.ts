@@ -19,6 +19,8 @@ type UseStudioJobSyncArgs = {
   clearPendingPublish: () => void
   cancelPublishQueue: () => void
   setAdvancedLayout: (value: boolean) => void
+  /** Called when a revision change from our own successful publish is acked. */
+  onOwnPublishAck?: (job: StudioJob) => void
 }
 
 function applyExternalSync({
@@ -54,6 +56,24 @@ function applyExternalSync({
   }
 }
 
+function ackOwnPublishRevision({
+  currentRevision,
+  lastAckedRevisionRef,
+  expectingOwnPublishRef,
+  onOwnPublishAck,
+  job,
+}: {
+  currentRevision: string
+  lastAckedRevisionRef: MutableRefObject<string | null>
+  expectingOwnPublishRef: MutableRefObject<boolean>
+  onOwnPublishAck?: (job: StudioJob) => void
+  job: StudioJob
+}) {
+  lastAckedRevisionRef.current = currentRevision
+  expectingOwnPublishRef.current = false
+  onOwnPublishAck?.(job)
+}
+
 export function useStudioJobSync({
   job,
   publishing,
@@ -63,11 +83,18 @@ export function useStudioJobSync({
   clearPendingPublish,
   cancelPublishQueue,
   setAdvancedLayout,
+  onOwnPublishAck,
 }: UseStudioJobSyncArgs) {
   const lastAckedRevisionRef = useRef<string | null>(null)
   const lastJobIdRef = useRef(job._id)
   const wasPublishingRef = useRef(publishing)
   const revisionAtPublishStartRef = useRef<string | null>(null)
+  const expectingOwnPublishRef = useRef(false)
+  const onOwnPublishAckRef = useRef(onOwnPublishAck)
+
+  useEffect(() => {
+    onOwnPublishAckRef.current = onOwnPublishAck
+  }, [onOwnPublishAck])
 
   useEffect(() => {
     if (lastJobIdRef.current !== job._id) {
@@ -75,6 +102,7 @@ export function useStudioJobSync({
       lastAckedRevisionRef.current = getStudioRevision(job)
       wasPublishingRef.current = publishing
       revisionAtPublishStartRef.current = null
+      expectingOwnPublishRef.current = false
       onResetLocalState()
       setAdvancedLayout(false)
       clearPendingPublish()
@@ -85,6 +113,7 @@ export function useStudioJobSync({
 
     if (!wasPublishingRef.current && publishing) {
       revisionAtPublishStartRef.current = lastAckedRevisionRef.current
+      expectingOwnPublishRef.current = true
     }
 
     const justFinishedPublishing = wasPublishingRef.current && !publishing
@@ -99,21 +128,38 @@ export function useStudioJobSync({
       const revisionAtPublishStart = revisionAtPublishStartRef.current
       revisionAtPublishStartRef.current = null
 
-      const hadExternalChangeDuringPublish =
+      const revisionChangedSincePublishStart =
         revisionAtPublishStart !== null &&
         revisionAtPublishStart !== currentRevision
 
-      lastAckedRevisionRef.current = currentRevision
+      if (lastPublishFailedRef.current) {
+        expectingOwnPublishRef.current = false
+        lastAckedRevisionRef.current = currentRevision
 
-      if (hadExternalChangeDuringPublish && lastPublishFailedRef.current) {
-        applyExternalSync({
-          job,
-          advancedLayout,
-          clearPendingPublish,
-          onResetLocalState,
-          setAdvancedLayout,
-          notify: true,
-        })
+        if (revisionChangedSincePublishStart) {
+          applyExternalSync({
+            job,
+            advancedLayout,
+            clearPendingPublish,
+            onResetLocalState,
+            setAdvancedLayout,
+            notify: true,
+          })
+        }
+      } else if (expectingOwnPublishRef.current) {
+        // Successful publish: Convex may not have pushed the new revision yet.
+        // Only ack immediately if the subscription already caught up.
+        if (revisionChangedSincePublishStart) {
+          ackOwnPublishRevision({
+            currentRevision,
+            lastAckedRevisionRef,
+            expectingOwnPublishRef,
+            onOwnPublishAck: onOwnPublishAckRef.current,
+            job,
+          })
+        }
+      } else {
+        lastAckedRevisionRef.current = currentRevision
       }
       return
     }
@@ -125,6 +171,17 @@ export function useStudioJobSync({
     }
 
     if (publishing) {
+      return
+    }
+
+    if (expectingOwnPublishRef.current && !lastPublishFailedRef.current) {
+      ackOwnPublishRevision({
+        currentRevision,
+        lastAckedRevisionRef,
+        expectingOwnPublishRef,
+        onOwnPublishAck: onOwnPublishAckRef.current,
+        job,
+      })
       return
     }
 

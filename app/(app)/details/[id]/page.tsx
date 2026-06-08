@@ -121,7 +121,7 @@ export default function DetailPage() {
   const showResult = job.status === "completed" && job.outputUrl
 
   return (
-    <main className="animate-fade-in mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+    <main className="animate-fade-in app-container py-8">
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <Button

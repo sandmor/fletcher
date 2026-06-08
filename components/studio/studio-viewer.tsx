@@ -1,9 +1,9 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useCallback, useEffect, useState, type MutableRefObject } from "react"
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react"
 import Image from "next/image"
-import { ChevronsLeftRight } from "lucide-react"
+import { ChevronsLeftRight, Sliders } from "lucide-react"
 import { Doc, Id } from "@/convex/_generated/dataModel"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -17,19 +17,12 @@ import type { CompositionLayout } from "@/lib/composition-layout"
 import { getStudioRevision } from "@/lib/studio/job-studio-revision"
 import { cn } from "@/lib/utils"
 
-const CompositorEditor = dynamic(
+const CompositionEditorOverlay = dynamic(
   () =>
-    import("@/components/studio/compositor-editor").then(
-      (mod) => mod.CompositorEditor
+    import("@/components/studio/composition-editor-overlay").then(
+      (mod) => mod.CompositionEditorOverlay
     ),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="flex h-full w-full items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-      </div>
-    ),
-  }
+  { ssr: false, loading: () => null }
 )
 
 type StudioTab = "edit" | "compare" | "original"
@@ -49,10 +42,28 @@ export function StudioViewer({ job, publishEnabledRef }: StudioViewerProps) {
   const [editorSessionKey, setEditorSessionKey] = useState(
     () => `${job._id}-${getStudioRevision(job)}`
   )
+  const [layoutResetToken, setLayoutResetToken] = useState(0)
+  const [overlaySessionBackground, setOverlaySessionBackground] =
+    useState<BackgroundConfig | null>(null)
+  const skipLayoutResetOnOwnAckRef = useRef(false)
 
   const resetLocalState = useCallback(() => {
     setPreviewBackground(undefined)
   }, [])
+
+  const onOwnPublishAck = useCallback(
+    (updatedJob: Doc<"jobs"> & { outputUrl: string }) => {
+      if (!advancedLayout || updatedJob.compositionLayout) return
+
+      if (skipLayoutResetOnOwnAckRef.current) {
+        skipLayoutResetOnOwnAckRef.current = false
+        return
+      }
+
+      setLayoutResetToken((token) => token + 1)
+    },
+    [advancedLayout]
+  )
 
   const {
     publishing,
@@ -78,20 +89,33 @@ export function StudioViewer({ job, publishEnabledRef }: StudioViewerProps) {
     clearPendingPublish: clearPendingSolidPublish,
     cancelPublishQueue,
     setAdvancedLayout,
+    onOwnPublishAck,
   })
 
-  useEffect(() => {
-    if (!advancedLayout) {
-      setEditorSessionKey(`${job._id}-${getStudioRevision(job)}`)
-    }
-  }, [job, advancedLayout])
-
-  const openAdvancedLayout = useCallback(() => {
+  const handleOverlayClosed = useCallback(() => {
     setEditorSessionKey(`${job._id}-${getStudioRevision(job)}`)
-    setAdvancedLayout(true)
+    setLayoutResetToken(0)
+    setOverlaySessionBackground(null)
+    skipLayoutResetOnOwnAckRef.current = false
   }, [job])
 
+  const openAdvancedLayout = useCallback(() => {
+    const background = previewBackground ?? job.background
+    if (!background) return
+
+    setEditorSessionKey(`${job._id}-${getStudioRevision(job)}`)
+    setOverlaySessionBackground(background)
+    setAdvancedLayout(true)
+  }, [job, previewBackground])
+
   const activeBackground = previewBackground ?? job.background
+
+  // Keep overlay session background in sync while the editor is open.
+  useEffect(() => {
+    if (advancedLayout && activeBackground) {
+      setOverlaySessionBackground(activeBackground)
+    }
+  }, [advancedLayout, activeBackground])
 
   const handleSolidChange = useCallback(
     (background: { type: "solid"; color: string }) => {
@@ -107,10 +131,12 @@ export function StudioViewer({ job, publishEnabledRef }: StudioViewerProps) {
       imageUrl: string
       fileName: string
     }) => {
+      skipLayoutResetOnOwnAckRef.current = true
       setPreviewBackground(background)
       try {
         await publishBackgroundImage(background)
       } catch {
+        skipLayoutResetOnOwnAckRef.current = false
         setPreviewBackground(undefined)
       }
     },
@@ -137,6 +163,8 @@ export function StudioViewer({ job, publishEnabledRef }: StudioViewerProps) {
   )
 
   const showAdvancedEntry = Boolean(activeBackground) && !advancedLayout
+  const overlayPickerBackground =
+    activeBackground ?? overlaySessionBackground ?? undefined
 
   return (
     <div className="flex flex-col gap-6">
@@ -171,36 +199,23 @@ export function StudioViewer({ job, publishEnabledRef }: StudioViewerProps) {
             {activeTab !== "edit" && <TransparencyBackground />}
 
             <div
+              key={activeTab}
               className={cn(
-                "relative flex w-full items-center justify-center p-6 sm:p-12",
-                activeTab === "edit" && advancedLayout
-                  ? "aspect-auto min-h-[420px]"
-                  : "aspect-4/3 sm:aspect-video"
+                "relative flex aspect-4/3 w-full items-center justify-center p-6 sm:aspect-video sm:p-12",
+                "animate-fade-in"
               )}
             >
-              {activeTab === "edit" && advancedLayout && activeBackground && (
-                <CompositorEditor
-                  key={editorSessionKey}
-                  foregroundUrl={job.outputUrl}
-                  background={activeBackground}
-                  initialLayout={job.compositionLayout}
-                  onDone={handleCompositionDone}
-                  saving={publishing}
-                  className="animate-fade-in h-full w-full"
-                />
-              )}
-
-              {activeTab === "edit" && !advancedLayout && (
+              {activeTab === "edit" && (
                 <CompositorPreview
                   foregroundUrl={job.outputUrl}
                   background={activeBackground}
                   layout={job.compositionLayout}
-                  className="animate-fade-in h-full w-full"
+                  className="h-full w-full"
                 />
               )}
 
               {activeTab === "original" && (
-                <div className="animate-fade-in relative h-full w-full">
+                <div className="relative h-full w-full">
                   <Image
                     src={job.inputUrl}
                     alt="Original"
@@ -212,7 +227,7 @@ export function StudioViewer({ job, publishEnabledRef }: StudioViewerProps) {
               )}
 
               {activeTab === "compare" && (
-                <div className="animate-fade-in relative h-full w-full overflow-hidden rounded-lg bg-background/50 shadow-2xl ring-1 ring-border/50">
+                <div className="relative h-full w-full overflow-hidden rounded-lg bg-background/50 shadow-2xl ring-1 ring-border/50">
                   <Image
                     src={job.outputUrl}
                     alt="Result"
@@ -257,16 +272,19 @@ export function StudioViewer({ job, publishEnabledRef }: StudioViewerProps) {
             </div>
 
             {activeTab === "edit" && showAdvancedEntry && (
-              <div className="border-t border-border px-6 py-3">
+              <div className="animate-fade-in flex items-center justify-between gap-3 border-t border-border px-6 py-3">
+                <p className="text-xs text-muted-foreground">
+                  Reposition layers, resize, and crop in the full editor.
+                </p>
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
-                  className="text-muted-foreground"
                   disabled={publishing}
                   onClick={openAdvancedLayout}
                 >
-                  Adjust positioning
+                  <Sliders />
+                  Edit composition
                 </Button>
               </div>
             )}
@@ -291,6 +309,32 @@ export function StudioViewer({ job, publishEnabledRef }: StudioViewerProps) {
           </Card>
         )}
       </div>
+
+      {overlaySessionBackground && (
+        <CompositionEditorOverlay
+          open={advancedLayout}
+          onClose={() => setAdvancedLayout(false)}
+          onClosed={handleOverlayClosed}
+          editorKey={editorSessionKey}
+          layoutResetToken={layoutResetToken}
+          fileName={job.fileName}
+          foregroundUrl={job.outputUrl}
+          background={overlaySessionBackground}
+          initialLayout={job.compositionLayout}
+          onDone={handleCompositionDone}
+          saving={publishing}
+          backgroundPanel={
+            <BackgroundPicker
+              jobId={job._id}
+              value={overlayPickerBackground}
+              onSolidChange={handleSolidChange}
+              onImageUploaded={handleImageUploaded}
+              onClear={() => void handleBackgroundClear()}
+              disabled={publishing}
+            />
+          }
+        />
+      )}
     </div>
   )
 }

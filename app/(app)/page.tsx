@@ -36,13 +36,13 @@ export default function UploadPage() {
   })
 
   return (
-    <main className="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:px-8">
-      <div className="animate-fade-in flex flex-col gap-8">
+    <main className="app-container flex flex-1 flex-col justify-center py-10 sm:py-16">
+      <div className="animate-fade-in mx-auto flex w-full max-w-3xl flex-col gap-8">
         <div className="space-y-3 text-center">
-          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
+          <h1 className="text-3xl font-bold tracking-tight sm:text-5xl">
             Remove backgrounds
           </h1>
-          <p className="mx-auto max-w-xl text-lg text-muted-foreground">
+          <p className="mx-auto max-w-xl text-base text-muted-foreground sm:text-lg">
             Drop your images below. We&apos;ll handle the rest.
           </p>
         </div>
@@ -57,7 +57,7 @@ export default function UploadPage() {
                 : "border-border bg-card hover:border-primary/50 hover:bg-accent/30"
             )}
           >
-            <CardContent className="flex flex-col items-center justify-center gap-6 py-20">
+            <CardContent className="flex flex-col items-center justify-center gap-6 py-16 sm:py-20">
               <input {...getInputProps()} />
               <div
                 className={cn(
