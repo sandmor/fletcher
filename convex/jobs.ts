@@ -40,7 +40,11 @@ export const createJob = mutation({
 })
 
 export const triggerModalJob = action({
-  args: { jobId: v.id("jobs"), inputUrl: v.string() },
+  args: {
+    jobId: v.id("jobs"),
+    inputUrl: v.string(),
+    alphaMatting: v.optional(v.boolean()),
+  },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity()
     if (!identity) {
@@ -67,6 +71,7 @@ export const triggerModalJob = action({
         downloadUrl: finalDownloadUrl,
         callbackUrl: callbackUrl,
         callbackSecret: process.env.MODAL_CALLBACK_SECRET,
+        alphaMatting: args.alphaMatting === true,
       }),
     })
 

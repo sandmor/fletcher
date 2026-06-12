@@ -97,6 +97,7 @@ class BiRefNetProcessor:
         download_url: str,
         callback_url: str,
         callback_secret: str | None = None,
+        alpha_matting: bool = False,
     ):
         try:
             _send_callback(callback_url, {"jobId": job_id, "status": "processing"}, callback_secret)
@@ -107,14 +108,17 @@ class BiRefNetProcessor:
 
             # Process the image automatically via our pre-loaded session
             import rembg
-            output_bytes = rembg.remove(
-                input_response.content, 
-                session=self.session,
-                alpha_matting=True,
-                alpha_matting_foreground_threshold=240, # Pixels above this are strictly foreground
-                alpha_matting_background_threshold=10,  # Pixels below this are strictly background
-                alpha_matting_erode_size=10             # How much to erode the boundary to calculate the soft edge
-            )
+            remove_kwargs: dict = {
+                "session": self.session,
+            }
+            if alpha_matting:
+                remove_kwargs.update(
+                    alpha_matting=True,
+                    alpha_matting_foreground_threshold=240,  # Pixels above this are strictly foreground
+                    alpha_matting_background_threshold=10,  # Pixels below this are strictly background
+                    alpha_matting_erode_size=10,  # How much to erode the boundary to calculate the soft edge
+                )
+            output_bytes = rembg.remove(input_response.content, **remove_kwargs)
 
             # Upload the processed image
             upload_response = requests.put(
@@ -149,5 +153,6 @@ def trigger_job(data: dict):
         data["downloadUrl"],
         data["callbackUrl"],
         data.get("callbackSecret"),
+        data.get("alphaMatting", False),
     )
     return {"message": "Job queued for processing."}
