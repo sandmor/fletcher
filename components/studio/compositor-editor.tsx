@@ -37,7 +37,9 @@ import {
   getStageViewportInShapeCoords,
   getViewportDimRects,
   getWorkspaceSize,
+  isBackgroundLayerEditable,
   layerToStageCoords,
+  normalizeCompositionLayout,
   MAX_USER_ZOOM,
   MIN_FRAME_SIZE,
   MIN_USER_ZOOM,
@@ -78,6 +80,10 @@ const LAYER_OPTIONS = [
 
 function touchDistance(a: Touch, b: Touch) {
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+}
+
+function isStageDrag(e: Konva.KonvaEventObject<DragEvent>) {
+  return e.target === e.target.getStage()
 }
 
 function ViewportDimOverlay({
@@ -178,6 +184,17 @@ export function CompositorEditor({
 
   const backgroundIdentityKey =
     background.type === "solid" ? "solid" : `image:${background.imageUrl}`
+
+  const backgroundLayerEditable = isBackgroundLayerEditable(background)
+  const visibleLayerOptions = LAYER_OPTIONS.filter(
+    ([id]) => backgroundLayerEditable || id !== "background"
+  )
+
+  useEffect(() => {
+    if (!backgroundLayerEditable && selectedLayer === "background") {
+      setSelectedLayer("foreground")
+    }
+  }, [backgroundLayerEditable, selectedLayer])
 
   useEffect(() => {
     let cancelled = false
@@ -559,13 +576,13 @@ export function CompositorEditor({
 
     setIsSaving(true)
     try {
-      await onDone(layout)
+      await onDone(normalizeCompositionLayout(layout, background))
     } catch {
       // Error surfaced via publish hook toast
     } finally {
       setIsSaving(false)
     }
-  }, [isSaving, layout, onDone, saving])
+  }, [background, isSaving, layout, onDone, saving])
 
   const handleFrameTransform = useCallback(() => {
     const node = frameRef.current
@@ -726,8 +743,13 @@ export function CompositorEditor({
       <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
         Layer
       </p>
-      <div className="grid grid-cols-3 gap-1.5">
-        {LAYER_OPTIONS.map(([id, label]) => (
+      <div
+        className={cn(
+          "grid gap-1.5",
+          visibleLayerOptions.length === 2 ? "grid-cols-2" : "grid-cols-3"
+        )}
+      >
+        {visibleLayerOptions.map(([id, label]) => (
           <button
             key={id}
             type="button"
@@ -872,9 +894,16 @@ export function CompositorEditor({
           x={stageTransform.x}
           y={stageTransform.y}
           draggable={panMode || isSpacePressed}
-          onDragStart={() => setIsPanning(true)}
-          onDragMove={syncStagePan}
-          onDragEnd={() => {
+          onDragStart={(e) => {
+            if (!isStageDrag(e)) return
+            setIsPanning(true)
+          }}
+          onDragMove={(e) => {
+            if (!isStageDrag(e)) return
+            syncStagePan()
+          }}
+          onDragEnd={(e) => {
+            if (!isStageDrag(e)) return
             syncStagePan()
             setIsPanning(false)
           }}
@@ -897,18 +926,15 @@ export function CompositorEditor({
                 />
               )}
 
-            {backgroundStage && background.type === "solid" && (
+            {background.type === "solid" && (
               <Rect
-                ref={backgroundRef as React.RefObject<Konva.Rect>}
-                x={backgroundStage.x}
-                y={backgroundStage.y}
-                width={backgroundStage.width}
-                height={backgroundStage.height}
+                x={frameOffset.x}
+                y={frameOffset.y}
+                width={layout.width}
+                height={layout.height}
                 fill={background.color}
-                draggable={layersDraggable}
-                listening={backgroundListening}
-                onDragEnd={() => handleDragEnd("background")}
-                onTransformEnd={() => handleTransformEnd("background")}
+                listening={false}
+                draggable={false}
               />
             )}
 

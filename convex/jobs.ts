@@ -179,6 +179,7 @@ export const patchJobBackground = internalMutation({
     jobId: v.id("jobs"),
     background: backgroundValidator,
     clearCompositionLayout: v.optional(v.boolean()),
+    compositionLayout: v.optional(compositionLayoutValidator),
     compositeUrl: v.optional(v.union(v.string(), v.null())),
   },
   handler: async (ctx, args) => {
@@ -192,15 +193,31 @@ export const patchJobBackground = internalMutation({
       return
     }
 
+    const job = await ctx.db.get(args.jobId)
+
     const patch: {
       background: typeof args.background
-      compositionLayout?: undefined
+      compositionLayout?: {
+        width: number
+        height: number
+        foreground: { x: number; y: number; width: number; height: number }
+        background?: { x: number; y: number; width: number; height: number }
+      }
       compositeUrl?: string
       compositeUpdatedAt?: number
     } = { background: args.background }
 
     if (args.clearCompositionLayout) {
       patch.compositionLayout = undefined
+    } else if (args.compositionLayout !== undefined && args.compositionLayout !== null) {
+      patch.compositionLayout = args.compositionLayout
+    } else if (args.compositionLayout === null) {
+      patch.compositionLayout = undefined
+    } else if (job?.compositionLayout && args.background.type === "solid") {
+      const { background: _backgroundLayer, ...rest } = job.compositionLayout
+      if (job.compositionLayout.background !== undefined) {
+        patch.compositionLayout = rest
+      }
     }
 
     if (args.compositeUrl) {
@@ -441,6 +458,7 @@ export const updateJobBackground = action({
     jobId: v.id("jobs"),
     background: backgroundValidator,
     compositeUrl: v.optional(v.string()),
+    compositionLayout: v.optional(compositionLayoutValidator),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity()
@@ -480,14 +498,13 @@ export const updateJobBackground = action({
       args.background === null ||
       (job.background?.type === "image" &&
         args.background?.type === "image" &&
-        job.background.imageUrl !== args.background.imageUrl) ||
-      (job.background?.type !== args.background?.type &&
-        args.background !== null)
+        job.background.imageUrl !== args.background.imageUrl)
 
     await ctx.runMutation(internal.jobs.patchJobBackground, {
       jobId: args.jobId,
       background: args.background,
       clearCompositionLayout,
+      compositionLayout: args.compositionLayout,
       compositeUrl: args.background === null ? null : args.compositeUrl,
     })
   },

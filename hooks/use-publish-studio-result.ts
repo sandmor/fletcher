@@ -12,7 +12,12 @@ import { toast } from "sonner"
 import { api } from "@/convex/_generated/api"
 import { Id } from "@/convex/_generated/dataModel"
 import type { BackgroundConfig } from "@/lib/background"
-import type { CompositionLayout } from "@/lib/composition-layout"
+import {
+  adaptCompositionLayoutOnBackgroundUpdate,
+  normalizeCompositionLayout,
+  type CompositionLayout,
+} from "@/lib/composition-layout"
+import { loadBackgroundImage } from "@/lib/image-compositor"
 import { publishStudioResult } from "@/lib/studio/publish-studio-result"
 
 const SOLID_COLOR_DEBOUNCE_MS = 400
@@ -183,10 +188,13 @@ export function usePublishStudioResult(
       solidColorTimeoutRef.current = setTimeout(() => {
         pendingSolidRef.current = null
         solidColorTimeoutRef.current = null
+        const solidBackground = { type: "solid" as const, color }
         void enqueuePublish({
-          background: { type: "solid", color },
-          compositionLayout,
-          patch: { background: { type: "solid", color } },
+          background: solidBackground,
+          compositionLayout: compositionLayout
+            ? normalizeCompositionLayout(compositionLayout, solidBackground)
+            : undefined,
+          patch: { background: solidBackground },
         })
       }, SOLID_COLOR_DEBOUNCE_MS)
     },
@@ -194,14 +202,34 @@ export function usePublishStudioResult(
   )
 
   const publishBackgroundImage = useCallback(
-    async (background: Extract<BackgroundConfig, { type: "image" }>) => {
+    async (
+      background: Extract<BackgroundConfig, { type: "image" }>,
+      options?: {
+        previousBackground?: BackgroundConfig
+        compositionLayout?: CompositionLayout
+      }
+    ) => {
       if (!isEnabled()) return
 
       clearPendingSolidPublish()
+
+      const bgImage = await loadBackgroundImage(background.imageUrl)
+      const adaptedLayout = adaptCompositionLayoutOnBackgroundUpdate(
+        options?.compositionLayout,
+        options?.previousBackground,
+        background,
+        {
+          width: bgImage.naturalWidth,
+          height: bgImage.naturalHeight,
+        }
+      )
+
       await enqueuePublish({
         background,
-        compositionLayout: undefined,
-        patch: { background },
+        compositionLayout: adaptedLayout,
+        patch: adaptedLayout
+          ? { background, compositionLayout: adaptedLayout }
+          : { background },
       })
     },
     [clearPendingSolidPublish, enqueuePublish, isEnabled]
@@ -222,10 +250,11 @@ export function usePublishStudioResult(
       if (!isEnabled()) return
 
       clearPendingSolidPublish()
+      const normalizedLayout = normalizeCompositionLayout(layout, background)
       await enqueuePublish({
         background,
-        compositionLayout: layout,
-        patch: { compositionLayout: layout, background },
+        compositionLayout: normalizedLayout,
+        patch: { compositionLayout: normalizedLayout, background },
       })
     },
     [clearPendingSolidPublish, enqueuePublish, isEnabled]

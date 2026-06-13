@@ -1,7 +1,7 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react"
+import { useCallback, useEffect, useState, type MutableRefObject } from "react"
 import Image from "next/image"
 import { ChevronsLeftRight, Sliders } from "lucide-react"
 import { Doc, Id } from "@/convex/_generated/dataModel"
@@ -45,7 +45,6 @@ export function StudioViewer({ job, publishEnabledRef }: StudioViewerProps) {
   const [layoutResetToken, setLayoutResetToken] = useState(0)
   const [overlaySessionBackground, setOverlaySessionBackground] =
     useState<BackgroundConfig | null>(null)
-  const skipLayoutResetOnOwnAckRef = useRef(false)
 
   const resetLocalState = useCallback(() => {
     setPreviewBackground(undefined)
@@ -54,11 +53,6 @@ export function StudioViewer({ job, publishEnabledRef }: StudioViewerProps) {
   const onOwnPublishAck = useCallback(
     (updatedJob: Doc<"jobs"> & { outputUrl: string }) => {
       if (!advancedLayout || updatedJob.compositionLayout) return
-
-      if (skipLayoutResetOnOwnAckRef.current) {
-        skipLayoutResetOnOwnAckRef.current = false
-        return
-      }
 
       setLayoutResetToken((token) => token + 1)
     },
@@ -96,7 +90,6 @@ export function StudioViewer({ job, publishEnabledRef }: StudioViewerProps) {
     setEditorSessionKey(`${job._id}-${getStudioRevision(job)}`)
     setLayoutResetToken(0)
     setOverlaySessionBackground(null)
-    skipLayoutResetOnOwnAckRef.current = false
   }, [job])
 
   const openAdvancedLayout = useCallback(() => {
@@ -131,16 +124,17 @@ export function StudioViewer({ job, publishEnabledRef }: StudioViewerProps) {
       imageUrl: string
       fileName: string
     }) => {
-      skipLayoutResetOnOwnAckRef.current = true
       setPreviewBackground(background)
       try {
-        await publishBackgroundImage(background)
+        await publishBackgroundImage(background, {
+          previousBackground: previewBackground ?? job.background,
+          compositionLayout: job.compositionLayout,
+        })
       } catch {
-        skipLayoutResetOnOwnAckRef.current = false
         setPreviewBackground(undefined)
       }
     },
-    [publishBackgroundImage]
+    [job.background, job.compositionLayout, previewBackground, publishBackgroundImage]
   )
 
   const handleBackgroundClear = useCallback(async () => {
@@ -274,7 +268,9 @@ export function StudioViewer({ job, publishEnabledRef }: StudioViewerProps) {
             {activeTab === "edit" && showAdvancedEntry && (
               <div className="animate-fade-in flex items-center justify-between gap-3 border-t border-border px-6 py-3">
                 <p className="text-xs text-muted-foreground">
-                  Reposition layers, resize, and crop in the full editor.
+                  {activeBackground?.type === "solid"
+                    ? "Resize canvas and reposition the cutout in the full editor."
+                    : "Reposition layers, resize, and crop in the full editor."}
                 </p>
                 <Button
                   type="button"

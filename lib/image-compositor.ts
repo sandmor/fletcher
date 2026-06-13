@@ -88,16 +88,7 @@ export async function compositeImageWithLayout(
 
   if (background.type === "solid") {
     context.fillStyle = background.color
-    if (layout.background) {
-      context.fillRect(
-        layout.background.x,
-        layout.background.y,
-        layout.background.width,
-        layout.background.height
-      )
-    } else {
-      context.fillRect(0, 0, layout.width, layout.height)
-    }
+    context.fillRect(0, 0, layout.width, layout.height)
   } else if (background.type === "image" && layout.background) {
     const backgroundImage = await loadImage(background.imageUrl, "background")
     context.drawImage(

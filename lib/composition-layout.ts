@@ -57,8 +57,57 @@ export function createDefaultLayout(
       width,
       height
     )
-  } else if (background) {
-    layout.background = { x: 0, y: 0, width, height }
+  }
+
+  return layout
+}
+
+export function isBackgroundLayerEditable(background: BackgroundConfig): boolean {
+  return background.type === "image"
+}
+
+export function normalizeCompositionLayout(
+  layout: CompositionLayout,
+  background: BackgroundConfig
+): CompositionLayout {
+  if (background.type === "solid") {
+    const { background: _backgroundLayer, ...rest } = layout
+    return rest
+  }
+
+  if (!layout.background) {
+    return {
+      ...layout,
+      background: { x: 0, y: 0, width: layout.width, height: layout.height },
+    }
+  }
+
+  return layout
+}
+
+export function adaptCompositionLayoutOnBackgroundUpdate(
+  layout: CompositionLayout | undefined,
+  previous: BackgroundConfig | undefined,
+  next: BackgroundConfig | null,
+  imageDimensions?: { width: number; height: number }
+): CompositionLayout | undefined {
+  if (!layout) return undefined
+  if (shouldClearLayoutOnBackgroundChange(previous, next)) return undefined
+
+  if (next?.type === "solid") {
+    return normalizeCompositionLayout(layout, next)
+  }
+
+  if (next?.type === "image" && imageDimensions) {
+    return {
+      ...layout,
+      background: coverFitRect(
+        imageDimensions.width,
+        imageDimensions.height,
+        layout.width,
+        layout.height
+      ),
+    }
   }
 
   return layout
@@ -260,7 +309,6 @@ export function shouldClearLayoutOnBackgroundChange(
 ): boolean {
   if (next === null) return true
   if (!previous) return false
-  if (previous.type !== next.type) return true
   if (previous.type === "image" && next.type === "image") {
     return previous.imageUrl !== next.imageUrl
   }

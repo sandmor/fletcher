@@ -1,6 +1,9 @@
 import type { Id } from "@/convex/_generated/dataModel"
 import type { BackgroundConfig } from "@/lib/background"
-import type { CompositionLayout } from "@/lib/composition-layout"
+import {
+  normalizeCompositionLayout,
+  type CompositionLayout,
+} from "@/lib/composition-layout"
 import {
   compositeImageFromUrl,
   exportCompositedBlob,
@@ -22,6 +25,7 @@ export type PublishStudioResultDeps = {
     jobId: Id<"jobs">
     background: BackgroundConfig | null
     compositeUrl?: string
+    compositionLayout?: CompositionLayout
   }) => Promise<unknown>
   saveCompositionLayout: (args: {
     jobId: Id<"jobs">
@@ -83,18 +87,22 @@ export async function publishStudioResult({
       ? (patch.compositionLayout ?? undefined)
       : compositionLayout
 
+  const normalizedLayout = effectiveLayout
+    ? normalizeCompositionLayout(effectiveLayout, effectiveBackground)
+    : undefined
+
   const compositeUrl = await uploadComposite(
     deps,
     jobId,
     outputUrl,
     effectiveBackground,
-    effectiveLayout
+    normalizedLayout
   )
 
   if (patch.compositionLayout !== undefined) {
     await deps.saveCompositionLayout({
       jobId,
-      compositionLayout: patch.compositionLayout,
+      compositionLayout: normalizedLayout ?? null,
       compositeUrl,
       background: effectiveBackground,
     })
@@ -106,6 +114,9 @@ export async function publishStudioResult({
       jobId,
       background: patch.background,
       compositeUrl,
+      ...(normalizedLayout !== undefined && {
+        compositionLayout: normalizedLayout,
+      }),
     })
   }
 }
